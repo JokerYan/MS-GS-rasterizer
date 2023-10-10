@@ -230,7 +230,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float dx = sqrt(level_set / conic.x);
 	float dy = sqrt(level_set / conic.z);
 	float pixel_size = min(dx, dy);
-	if (pixel_size < 1.0f) {
+	if (pixel_size < 2.0f) {
 	    return;
 	}
 
