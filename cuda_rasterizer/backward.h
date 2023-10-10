@@ -40,6 +40,7 @@ namespace BACKWARD
 	void preprocess(
 		int P, int D, int M,
 		const float3* means,
+	    const float4* conic_opacity,
 		const int* radii,
 		const float* shs,
 		const bool* clamped,

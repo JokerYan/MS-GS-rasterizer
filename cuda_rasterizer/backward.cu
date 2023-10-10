@@ -347,6 +347,7 @@ template<int C>
 __global__ void preprocessCUDA(
 	int P, int D, int M,
 	const float3* means,
+	const float4* conic_opacity,
 	const int* radii,
 	const float* shs,
 	const bool* clamped,
@@ -366,6 +367,17 @@ __global__ void preprocessCUDA(
 	auto idx = cg::this_grid().thread_rank();
 	if (idx >= P || !(radii[idx] > 0))
 		return;
+
+	// filter out small gaussians, same as forward
+    float occ = conic_opacity[idx].w;
+    float level_set = -2 * log(1 / (255.0f * occ));
+    level_set = max(0.0f, level_set);
+    float dx = sqrt(level_set / conic_opacity[idx].x);
+    float dy = sqrt(level_set / conic_opacity[idx].y);
+    float pixel_size = min(dx, dy);
+    if (pixel_size < 1.0f) {
+        return;
+    }
 
 	float3 m = means[idx];
 
@@ -559,6 +571,7 @@ renderCUDA(
 void BACKWARD::preprocess(
 	int P, int D, int M,
 	const float3* means3D,
+	const float4* conic_opacity,
 	const int* radii,
 	const float* shs,
 	const bool* clamped,
@@ -604,6 +617,7 @@ void BACKWARD::preprocess(
 	preprocessCUDA<NUM_CHANNELS> << < (P + 255) / 256, 256 >> > (
 		P, D, M,
 		(float3*)means3D,
+		conic_opacity,
 		radii,
 		shs,
 		clamped,

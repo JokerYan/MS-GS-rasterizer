@@ -11,6 +11,7 @@
 
 #include "forward.h"
 #include "auxiliary.h"
+#include <cstdio>
 #include <cooperative_groups.h>
 #include <cooperative_groups/reduce.h>
 namespace cg = cooperative_groups;
@@ -221,6 +222,19 @@ __global__ void preprocessCUDA(int P, int D, int M,
 		return;
 	float det_inv = 1.f / det;
 	float3 conic = { cov.z * det_inv, -cov.y * det_inv, cov.x * det_inv };
+
+	// calculate pixel size of the gaussian
+	float occ = opacities[idx];
+	float level_set = -2 * log(1 / (255.0f * occ));
+	level_set = max(0.0f, level_set);    // negative level set when gaussian opacity is too low
+	float dx = sqrt(level_set / conic.x);
+	float dy = sqrt(level_set / conic.z);
+	float pixel_size = min(dx, dy);
+	if (pixel_size < 1.0f) {
+	    return;
+	}
+
+//	printf("level set %f %f %f\n", level_set, occ, pixel_size);
 
 	// Compute extent in screen space (by finding eigenvalues of
 	// 2D covariance matrix). Use extent to compute a bounding rectangle

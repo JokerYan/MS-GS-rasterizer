@@ -411,6 +411,7 @@ void CudaRasterizer::Rasterizer::backward(
 	const float* cov3D_ptr = (cov3D_precomp != nullptr) ? cov3D_precomp : geomState.cov3D;
 	CHECK_CUDA(BACKWARD::preprocess(P, D, M,
 		(float3*)means3D,
+		geomState.conic_opacity,
 		radii,
 		shs,
 		geomState.clamped,
