@@ -269,6 +269,31 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	tiles_touched[idx] = (rect_max.y - rect_min.y) * (rect_max.x - rect_min.x);
 }
 
+
+__device__ __forceinline__ float fatomicMin(float* address, float val)
+{
+    int* address_as_i = (int*) address;
+    int old = *address_as_i, assumed;
+    do {
+        assumed = old;
+        old = ::atomicCAS(address_as_i, assumed,
+            __float_as_int(::fminf(val, __int_as_float(assumed))));
+    } while (assumed != old);
+    return __int_as_float(old);
+}
+
+__device__ __forceinline__ float fatomicMax(float* address, float val)
+{
+    int* address_as_i = (int*) address;
+    int old = *address_as_i, assumed;
+    do {
+        assumed = old;
+        old = ::atomicCAS(address_as_i, assumed,
+            __float_as_int(::fmaxf(val, __int_as_float(assumed))));
+    } while (assumed != old);
+    return __int_as_float(old);
+}
+
 // Main rasterization method. Collaboratively works on one tile per
 // block, each thread treats one pixel. Alternates between fetching 
 // and rasterizing data.
@@ -284,7 +309,9 @@ renderCUDA(
 	float* __restrict__ final_T,
 	uint32_t* __restrict__ n_contrib,
 	const float* __restrict__ bg_color,
-	float* __restrict__ out_color)
+	float* __restrict__ out_color,
+	float* __restrict__ out_acc_pixel_size
+	)
 {
 	// Identify current tile and associated min/max pixel range.
 	auto block = cg::this_thread_block();
@@ -309,12 +336,18 @@ renderCUDA(
 	__shared__ int collected_id[BLOCK_SIZE];
 	__shared__ float2 collected_xy[BLOCK_SIZE];
 	__shared__ float4 collected_conic_opacity[BLOCK_SIZE];
+	__shared__ float collected_pixel_size[BLOCK_SIZE];
+//	__shared__ float min_pixel_size;
+    __shared__ float max_pixel_size;
+    max_pixel_size = 0;
 
 	// Initialize helper variables
 	float T = 1.0f;
 	uint32_t contributor = 0;
 	uint32_t last_contributor = 0;
 	float C[CHANNELS] = { 0 };
+
+	float acc_pixel_size = 0;
 
 	// Iterate over batches until all done or range is complete
 	for (int i = 0; i < rounds; i++, toDo -= BLOCK_SIZE)
@@ -324,6 +357,11 @@ renderCUDA(
 		if (num_done == BLOCK_SIZE)
 			break;
 
+//		// sync to re-init min_pixel_size
+//		block.sync();
+//		min_pixel_size = 10000.0f;
+//		block.sync();
+
 		// Collectively fetch per-Gaussian data from global to shared
 		int progress = i * BLOCK_SIZE + block.thread_rank();
 		if (range.x + progress < range.y)
@@ -332,6 +370,22 @@ renderCUDA(
 			collected_id[block.thread_rank()] = coll_id;
 			collected_xy[block.thread_rank()] = points_xy_image[coll_id];
 			collected_conic_opacity[block.thread_rank()] = conic_opacity[coll_id];
+
+			// calculate pixel size
+			float4 conic = conic_opacity[coll_id];
+            float occ = conic.w;
+            float level_set = -2 * log(1 / (255.0f * occ));
+            level_set = max(0.0f, level_set);    // negative level set when gaussian opacity is too low
+            float dx = sqrt(level_set / conic.x);
+            float dy = sqrt(level_set / conic.z);
+            float pixel_size = min(dx, dy);
+            collected_pixel_size[block.thread_rank()] = pixel_size;
+
+//            // update min pixel size
+//            fatomicMin(&min_pixel_size, pixel_size);
+            if (occ > 0.5f) {
+                fatomicMax(&max_pixel_size, pixel_size);
+            }
 		}
 		block.sync();
 
@@ -357,6 +411,19 @@ renderCUDA(
 			float alpha = min(0.99f, con_o.w * exp(power));
 			if (alpha < 1.0f / 255.0f)
 				continue;
+
+			float pixel_size = collected_pixel_size[j];
+			acc_pixel_size += pixel_size * T * alpha;
+
+//			// scale alpha based on pixel size
+//			float pixel_size = collected_pixel_size[j];
+////			float min_pixel_size_clamped = max(2.0f, min_pixel_size);   // avoid division by zero
+//			float min_pixel_size_clamped = 2.0f;
+//			pixel_size = pixel_size / min_pixel_size_clamped;
+//			float rel_pixel_size = pixel_size / 8.0f;
+//			rel_pixel_size = min(1.0f, rel_pixel_size);     // larger gaussians rendered as normal, for now
+//			alpha = alpha * rel_pixel_size;     // smaller gaussians have lower opacity
+
 			float test_T = T * (1 - alpha);
 			if (test_T < 0.0001f)
 			{
@@ -375,6 +442,9 @@ renderCUDA(
 			last_contributor = contributor;
 		}
 	}
+//	if (pix_id % 37 == 0 && acc_pixel_size > 0.0f) {
+//        printf("acc pixel size %f\n", acc_pixel_size);
+//    }
 
 	// All threads that treat valid pixel write out their final
 	// rendering data to the frame and auxiliary buffers.
@@ -384,6 +454,7 @@ renderCUDA(
 		n_contrib[pix_id] = last_contributor;
 		for (int ch = 0; ch < CHANNELS; ch++)
 			out_color[ch * H * W + pix_id] = C[ch] + T * bg_color[ch];
+		out_acc_pixel_size[pix_id] = acc_pixel_size;
 	}
 }
 
@@ -398,7 +469,9 @@ void FORWARD::render(
 	float* final_T,
 	uint32_t* n_contrib,
 	const float* bg_color,
-	float* out_color)
+	float* out_color,
+	float* out_acc_pixel_size
+	)
 {
 	renderCUDA<NUM_CHANNELS> << <grid, block >> > (
 		ranges,
@@ -410,7 +483,9 @@ void FORWARD::render(
 		final_T,
 		n_contrib,
 		bg_color,
-		out_color);
+		out_color,
+		out_acc_pixel_size
+		);
 }
 
 void FORWARD::preprocess(int P, int D, int M,

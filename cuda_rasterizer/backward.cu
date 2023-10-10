@@ -447,6 +447,7 @@ renderCUDA(
 	__shared__ float2 collected_xy[BLOCK_SIZE];
 	__shared__ float4 collected_conic_opacity[BLOCK_SIZE];
 	__shared__ float collected_colors[C * BLOCK_SIZE];
+	__shared__ float collected_pixel_size[BLOCK_SIZE];
 
 	// In the forward, we stored the final value for T, the
 	// product of all (1 - alpha) factors. 
@@ -487,6 +488,16 @@ renderCUDA(
 			collected_conic_opacity[block.thread_rank()] = conic_opacity[coll_id];
 			for (int i = 0; i < C; i++)
 				collected_colors[i * BLOCK_SIZE + block.thread_rank()] = colors[coll_id * C + i];
+
+			// calculate pixel size
+			float4 conic = conic_opacity[coll_id];
+            float occ = conic.w;
+            float level_set = -2 * log(1 / (255.0f * occ));
+            level_set = max(0.0f, level_set);    // negative level set when gaussian opacity is too low
+            float dx = sqrt(level_set / conic.x);
+            float dy = sqrt(level_set / conic.z);
+            float pixel_size = min(dx, dy);
+            collected_pixel_size[block.thread_rank()] = pixel_size;
 		}
 		block.sync();
 
@@ -508,9 +519,19 @@ renderCUDA(
 				continue;
 
 			const float G = exp(power);
-			const float alpha = min(0.99f, con_o.w * G);
+//			const float alpha = min(0.99f, con_o.w * G);
+			float alpha = min(0.99f, con_o.w * G);
 			if (alpha < 1.0f / 255.0f)
 				continue;
+
+//			// scale alpha based on pixel size
+//			float pixel_size = collected_pixel_size[j];
+////			float min_pixel_size_clamped = max(2.0f, min_pixel_size);   // avoid division by zero
+//			float min_pixel_size_clamped = 2.0f;
+//			pixel_size = pixel_size / min_pixel_size_clamped;
+//			float rel_pixel_size = pixel_size / 8.0f;
+//			rel_pixel_size = min(1.0f, rel_pixel_size);     // larger gaussians rendered as normal, for now
+//			alpha = alpha * rel_pixel_size;     // smaller gaussians have lower opacity
 
 			T = T / (1.f - alpha);
 			const float dchannel_dcolor = alpha * T;
