@@ -230,6 +230,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float dx = sqrt(level_set / conic.x);
 	float dy = sqrt(level_set / conic.z);
 	float pixel_size = min(dx, dy);
+	pixel_size /= scale_modifier;       // use original gaussian size for filtering, for more faithful visualization
 	if (pixel_size < 2.0f) {
 	    return;
 	}
