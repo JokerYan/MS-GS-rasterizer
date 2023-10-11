@@ -98,8 +98,7 @@ class _RasterizeGaussians(torch.autograd.Function):
         return color, acc_pixel_size, radii
 
     @staticmethod
-    def backward(ctx, grad_out_color, _):
-
+    def backward(ctx, grad_out_color, grad_acc_pixel_size, _):
         # Restore necessary values from context
         num_rendered = ctx.num_rendered
         raster_settings = ctx.raster_settings
