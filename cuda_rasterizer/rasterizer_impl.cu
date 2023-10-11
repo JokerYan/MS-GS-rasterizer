@@ -217,6 +217,7 @@ int CudaRasterizer::Rasterizer::forward(
 	const bool prefiltered,
 	float* out_color,
 	float* out_acc_pixel_size,
+	float* out_depth,
 	int* radii,
 	bool debug)
 {
@@ -326,13 +327,15 @@ int CudaRasterizer::Rasterizer::forward(
 		binningState.point_list,
 		width, height,
 		geomState.means2D,
+		geomState.depths,
 		feature_ptr,
 		geomState.conic_opacity,
 		imgState.accum_alpha,
 		imgState.n_contrib,
 		background,
 		out_color,
-		out_acc_pixel_size
+		out_acc_pixel_size,
+		out_depth
 		), debug)
 
 	return num_rendered;

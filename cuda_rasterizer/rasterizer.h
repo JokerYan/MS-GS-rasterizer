@@ -50,6 +50,7 @@ namespace CudaRasterizer
 			const bool prefiltered,
 			float* out_color,
 			float* out_acc_pixel_size,
+			float* depth,
 			int* radii = nullptr,
 			bool debug = false);
 

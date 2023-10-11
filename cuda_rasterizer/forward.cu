@@ -305,13 +305,15 @@ renderCUDA(
 	const uint32_t* __restrict__ point_list,
 	int W, int H,
 	const float2* __restrict__ points_xy_image,
+	const float* __restrict__ depths,
 	const float* __restrict__ features,
 	const float4* __restrict__ conic_opacity,
 	float* __restrict__ final_T,
 	uint32_t* __restrict__ n_contrib,
 	const float* __restrict__ bg_color,
 	float* __restrict__ out_color,
-	float* __restrict__ out_acc_pixel_size
+	float* __restrict__ out_acc_pixel_size,
+	float* __restrict__ out_depth
 	)
 {
 	// Identify current tile and associated min/max pixel range.
@@ -341,6 +343,7 @@ renderCUDA(
 //	__shared__ float min_pixel_size;
     __shared__ float max_pixel_size;
     max_pixel_size = 0;
+    __shared__ float collected_depths[BLOCK_SIZE];
 
 	// Initialize helper variables
 	float T = 1.0f;
@@ -349,6 +352,7 @@ renderCUDA(
 	float C[CHANNELS] = { 0 };
 
 	float acc_pixel_size = 0;
+	float acc_depth = 0;
 
 	// Iterate over batches until all done or range is complete
 	for (int i = 0; i < rounds; i++, toDo -= BLOCK_SIZE)
@@ -387,6 +391,9 @@ renderCUDA(
             if (occ > 0.5f) {
                 fatomicMax(&max_pixel_size, pixel_size);
             }
+
+            // collect depth
+            collected_depths[block.thread_rank()] = depths[coll_id];
 		}
 		block.sync();
 
@@ -412,19 +419,21 @@ renderCUDA(
 			float alpha = min(0.99f, con_o.w * exp(power));
 
 			float pixel_size = collected_pixel_size[j];
-			acc_pixel_size += pixel_size * T * alpha;
 
 			// scale alpha based on pixel size
 //			float pixel_size = collected_pixel_size[j];
 //			float min_pixel_size_clamped = max(2.0f, min_pixel_size);   // avoid division by zero
 //			float min_pixel_size_clamped = 2.0f;
 //			pixel_size = pixel_size / min_pixel_size_clamped;
-			float rel_pixel_size = (pixel_size - 2.0f) / 4.0f;
+			float rel_pixel_size = pixel_size / 2.0f;
 			rel_pixel_size = min(1.0f, rel_pixel_size);     // larger gaussians rendered as normal, for now
 			alpha = alpha * rel_pixel_size;     // smaller gaussians have lower opacity
 
 			if (alpha < 1.0f / 255.0f)
 				continue;
+
+			acc_pixel_size += pixel_size * T * alpha;
+			acc_depth += collected_depths[j] * T * alpha;
 
 			float test_T = T * (1 - alpha);
 			if (test_T < 0.0001f)
@@ -457,6 +466,7 @@ renderCUDA(
 		for (int ch = 0; ch < CHANNELS; ch++)
 			out_color[ch * H * W + pix_id] = C[ch] + T * bg_color[ch];
 		out_acc_pixel_size[pix_id] = acc_pixel_size;
+		out_depth[pix_id] = acc_depth;
 	}
 }
 
@@ -466,13 +476,15 @@ void FORWARD::render(
 	const uint32_t* point_list,
 	int W, int H,
 	const float2* means2D,
+	const float* depths,
 	const float* colors,
 	const float4* conic_opacity,
 	float* final_T,
 	uint32_t* n_contrib,
 	const float* bg_color,
 	float* out_color,
-	float* out_acc_pixel_size
+	float* out_acc_pixel_size,
+	float* out_depth
 	)
 {
 	renderCUDA<NUM_CHANNELS> << <grid, block >> > (
@@ -480,13 +492,15 @@ void FORWARD::render(
 		point_list,
 		W, H,
 		means2D,
+		depths,
 		colors,
 		conic_opacity,
 		final_T,
 		n_contrib,
 		bg_color,
 		out_color,
-		out_acc_pixel_size
+		out_acc_pixel_size,
+		out_depth
 		);
 }
 
