@@ -524,12 +524,12 @@ renderCUDA(
 
 			// scale alpha based on pixel size
 			float pixel_size = collected_pixel_size[j];
-//			float min_pixel_size_clamped = max(2.0f, min_pixel_size);   // avoid division by zero
-//			float min_pixel_size_clamped = 2.0f;
-//			pixel_size = pixel_size / min_pixel_size_clamped;
-			float rel_pixel_size = pixel_size / 2.0f;
-			rel_pixel_size = min(1.0f, rel_pixel_size);     // larger gaussians rendered as normal, for now
-			alpha = alpha * rel_pixel_size;     // smaller gaussians have lower opacity
+////			float min_pixel_size_clamped = max(2.0f, min_pixel_size);   // avoid division by zero
+////			float min_pixel_size_clamped = 2.0f;
+////			pixel_size = pixel_size / min_pixel_size_clamped;
+//			float rel_pixel_size = pixel_size / 2.0f;
+//			rel_pixel_size = min(1.0f, rel_pixel_size);     // larger gaussians rendered as normal, for now
+//			alpha = alpha * rel_pixel_size;     // smaller gaussians have lower opacity
 
 			if (alpha < 1.0f / 255.0f)
 				continue;
