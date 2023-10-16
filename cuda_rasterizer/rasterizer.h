@@ -52,6 +52,7 @@ namespace CudaRasterizer
 			float* out_acc_pixel_size,
 			float* depth,
 			int* radii = nullptr,
+			float* pixel_sizes = nullptr,
 			bool debug = false);
 
 		static void backward(

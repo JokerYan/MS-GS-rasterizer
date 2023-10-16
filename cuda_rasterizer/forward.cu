@@ -171,6 +171,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	const float tan_fovx, float tan_fovy,
 	const float focal_x, float focal_y,
 	int* radii,
+	float* pixel_sizes,
 	float2* points_xy_image,
 	float* depths,
 	float* cov3Ds,
@@ -187,6 +188,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	// Initialize radius and touched tiles to 0. If this isn't changed,
 	// this Gaussian will not be processed further.
 	radii[idx] = 0;
+	pixel_sizes[idx] = 0;
 	tiles_touched[idx] = 0;
 
 	// Perform near culling, quit if outside.
@@ -231,6 +233,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float dy = sqrt(level_set / conic.z);
 	float pixel_size = min(dx, dy);
 	pixel_size /= scale_modifier;       // use original gaussian size for filtering, for more faithful visualization
+	pixel_sizes[idx] = pixel_size;
 	if (pixel_size < 2.0f) {
 	    return;
 	}
@@ -521,6 +524,7 @@ void FORWARD::preprocess(int P, int D, int M,
 	const float focal_x, float focal_y,
 	const float tan_fovx, float tan_fovy,
 	int* radii,
+	float* pixel_sizes,
 	float2* means2D,
 	float* depths,
 	float* cov3Ds,
@@ -548,6 +552,7 @@ void FORWARD::preprocess(int P, int D, int M,
 		tan_fovx, tan_fovy,
 		focal_x, focal_y,
 		radii,
+		pixel_sizes,
 		means2D,
 		depths,
 		cov3Ds,
