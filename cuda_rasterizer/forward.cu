@@ -237,6 +237,10 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	pixel_sizes[idx] = pixel_size;
 	if (pixel_size < 2.0f && !base_mask[idx]) {
 	    return;
+	} else if (pixel_size < 3.0f && pixel_size >= 2.0f && !base_mask[idx]) {
+	    float rel_pixel_size = (pixel_size - 2.0f) / 1.0f;
+	    rel_pixel_size = min(1.0f, rel_pixel_size);
+	    occ = occ * rel_pixel_size;
 	}
 
 //	printf("level set %f %f %f\n", level_set, occ, pixel_size);
@@ -270,7 +274,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	radii[idx] = my_radius;
 	points_xy_image[idx] = point_image;
 	// Inverse 2D covariance and opacity neatly pack into one float4
-	conic_opacity[idx] = { conic.x, conic.y, conic.z, opacities[idx] };
+	conic_opacity[idx] = { conic.x, conic.y, conic.z, occ };
 	tiles_touched[idx] = (rect_max.y - rect_min.y) * (rect_max.x - rect_min.x);
 }
 
@@ -429,7 +433,7 @@ renderCUDA(
 ////			float min_pixel_size_clamped = max(2.0f, min_pixel_size);   // avoid division by zero
 ////			float min_pixel_size_clamped = 2.0f;
 ////			pixel_size = pixel_size / min_pixel_size_clamped;
-//			float rel_pixel_size = pixel_size / 2.0f;
+//			float rel_pixel_size = (pixel_size - 2.0f) / 0.5f;
 //			rel_pixel_size = min(1.0f, rel_pixel_size);     // larger gaussians rendered as normal, for now
 //			alpha = alpha * rel_pixel_size;     // smaller gaussians have lower opacity
 
