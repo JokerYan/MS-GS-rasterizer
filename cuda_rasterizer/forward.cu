@@ -164,6 +164,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	bool* clamped,
 	const float* cov3D_precomp,
 	const float* colors_precomp,
+	const bool* base_mask,
 	const float* viewmatrix,
 	const float* projmatrix,
 	const glm::vec3* cam_pos,
@@ -234,7 +235,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float pixel_size = min(dx, dy);
 	pixel_size /= scale_modifier;       // use original gaussian size for filtering, for more faithful visualization
 	pixel_sizes[idx] = pixel_size;
-	if (pixel_size < 2.0f) {
+	if (pixel_size < 2.0f && !base_mask[idx]) {
 	    return;
 	}
 
@@ -517,6 +518,7 @@ void FORWARD::preprocess(int P, int D, int M,
 	bool* clamped,
 	const float* cov3D_precomp,
 	const float* colors_precomp,
+	const bool* base_mask,
 	const float* viewmatrix,
 	const float* projmatrix,
 	const glm::vec3* cam_pos,
@@ -545,6 +547,7 @@ void FORWARD::preprocess(int P, int D, int M,
 		clamped,
 		cov3D_precomp,
 		colors_precomp,
+		base_mask,
 		viewmatrix, 
 		projmatrix,
 		cam_pos,

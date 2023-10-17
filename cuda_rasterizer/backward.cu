@@ -354,6 +354,7 @@ __global__ void preprocessCUDA(
 	const glm::vec3* scales,
 	const glm::vec4* rotations,
 	const float scale_modifier,
+	const bool* base_mask,
 	const float* proj,
 	const glm::vec3* campos,
 	const float3* dL_dmean2D,
@@ -375,7 +376,7 @@ __global__ void preprocessCUDA(
     float dx = sqrt(level_set / conic_opacity[idx].x);
     float dy = sqrt(level_set / conic_opacity[idx].y);
     float pixel_size = min(dx, dy);
-    if (pixel_size < 2.0f) {
+    if (pixel_size < 2.0f && !base_mask[idx]) {
         return;
     }
 
@@ -601,6 +602,7 @@ void BACKWARD::preprocess(
 	const glm::vec4* rotations,
 	const float scale_modifier,
 	const float* cov3Ds,
+	const bool* base_mask,
 	const float* viewmatrix,
 	const float* projmatrix,
 	const float focal_x, float focal_y,
@@ -646,6 +648,7 @@ void BACKWARD::preprocess(
 		(glm::vec3*)scales,
 		(glm::vec4*)rotations,
 		scale_modifier,
+		base_mask,
 		projmatrix,
 		campos,
 		(float3*)dL_dmean2D,
