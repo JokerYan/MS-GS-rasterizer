@@ -421,6 +421,8 @@ renderCUDA(
 	const float* __restrict__ colors,
 	const float* __restrict__ final_Ts,
 	const uint32_t* __restrict__ n_contrib,
+	const bool* base_mask,
+	const float fade_size,
 	const float* __restrict__ dL_dpixels,
 	float3* __restrict__ dL_dmean2D,
 	float4* __restrict__ dL_dconic2D,
@@ -449,6 +451,7 @@ renderCUDA(
 	__shared__ float4 collected_conic_opacity[BLOCK_SIZE];
 	__shared__ float collected_colors[C * BLOCK_SIZE];
 	__shared__ float collected_pixel_size[BLOCK_SIZE];
+	__shared__ bool collected_base_mask[BLOCK_SIZE];
 
 	// In the forward, we stored the final value for T, the
 	// product of all (1 - alpha) factors. 
@@ -499,6 +502,7 @@ renderCUDA(
             float dy = sqrt(level_set / conic.z);
             float pixel_size = min(dx, dy);
             collected_pixel_size[block.thread_rank()] = pixel_size;
+            collected_base_mask[block.thread_rank()] = base_mask[coll_id];
 		}
 		block.sync();
 
@@ -523,14 +527,17 @@ renderCUDA(
 //			const float alpha = min(0.99f, con_o.w * G);
 			float alpha = min(0.99f, con_o.w * G);
 
-//			// scale alpha based on pixel size
-//			float pixel_size = collected_pixel_size[j];
-////			float min_pixel_size_clamped = max(2.0f, min_pixel_size);   // avoid division by zero
-////			float min_pixel_size_clamped = 2.0f;
-////			pixel_size = pixel_size / min_pixel_size_clamped;
-//			float rel_pixel_size = (pixel_size - 2.0f) / 0.5f;
-//			rel_pixel_size = min(1.0f, rel_pixel_size);     // larger gaussians rendered as normal, for now
-//			alpha = alpha * rel_pixel_size;     // smaller gaussians have lower opacity
+			// scale alpha based on pixel size
+			float pixel_size = collected_pixel_size[j];
+//			float min_pixel_size_clamped = max(2.0f, min_pixel_size);   // avoid division by zero
+//			float min_pixel_size_clamped = 2.0f;
+//			pixel_size = pixel_size / min_pixel_size_clamped;
+            if (fade_size > 0 && !collected_base_mask[j]) {
+                float rel_pixel_size = (pixel_size - 2.0f) / fade_size;
+                rel_pixel_size = min(1.0f, rel_pixel_size);     // larger gaussians rendered as normal, for now
+//                alpha = alpha * rel_pixel_size;     // smaller gaussians have lower opacity
+                alpha = min(alpha, rel_pixel_size);     // smaller gaussians have lower opacity
+            }
 
 			if (alpha < 1.0f / 255.0f)
 				continue;
@@ -671,6 +678,8 @@ void BACKWARD::render(
 	const float* colors,
 	const float* final_Ts,
 	const uint32_t* n_contrib,
+	const bool* base_mask,
+	const float fade_size,
 	const float* dL_dpixels,
 	float3* dL_dmean2D,
 	float4* dL_dconic2D,
@@ -687,6 +696,8 @@ void BACKWARD::render(
 		colors,
 		final_Ts,
 		n_contrib,
+		base_mask,
+		fade_size,
 		dL_dpixels,
 		dL_dmean2D,
 		dL_dconic2D,
