@@ -357,6 +357,7 @@ __global__ void preprocessCUDA(
 	const bool* base_mask,
 	const float* proj,
 	const glm::vec3* campos,
+	const bool filter_small,
 	const float3* dL_dmean2D,
 	glm::vec3* dL_dmeans,
 	float* dL_dcolor,
@@ -369,15 +370,17 @@ __global__ void preprocessCUDA(
 	if (idx >= P || !(radii[idx] > 0))
 		return;
 
-	// filter out small gaussians, same as forward
-    float occ = conic_opacity[idx].w;
-    float level_set = -2 * log(1 / (255.0f * occ));
-    level_set = max(0.0f, level_set);
-    float dx = sqrt(level_set / conic_opacity[idx].x);
-    float dy = sqrt(level_set / conic_opacity[idx].y);
-    float pixel_size = min(dx, dy);
-    if (pixel_size < 2.0f && !base_mask[idx]) {
-        return;
+    if (filter_small) {
+        // filter out small gaussians, same as forward
+        float occ = conic_opacity[idx].w;
+        float level_set = -2 * log(1 / (255.0f * occ));
+        level_set = max(0.0f, level_set);
+        float dx = sqrt(level_set / conic_opacity[idx].x);
+        float dy = sqrt(level_set / conic_opacity[idx].y);
+        float pixel_size = min(dx, dy);
+        if (pixel_size < 2.0f && !base_mask[idx]) {
+            return;
+        }
     }
 
 	float3 m = means[idx];
@@ -615,6 +618,7 @@ void BACKWARD::preprocess(
 	const float focal_x, float focal_y,
 	const float tan_fovx, float tan_fovy,
 	const glm::vec3* campos,
+	const bool filter_small,
 	const float3* dL_dmean2D,
 	const float* dL_dconic,
 	glm::vec3* dL_dmean3D,
@@ -658,6 +662,7 @@ void BACKWARD::preprocess(
 		base_mask,
 		projmatrix,
 		campos,
+		filter_small,
 		(float3*)dL_dmean2D,
 		(glm::vec3*)dL_dmean3D,
 		dL_dcolor,

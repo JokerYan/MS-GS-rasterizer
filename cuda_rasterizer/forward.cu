@@ -180,7 +180,9 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float4* conic_opacity,
 	const dim3 grid,
 	uint32_t* tiles_touched,
-	bool prefiltered)
+	bool prefiltered,
+	const bool filter_small
+	)
 {
 	auto idx = cg::this_grid().thread_rank();
 	if (idx >= P)
@@ -228,21 +230,24 @@ __global__ void preprocessCUDA(int P, int D, int M,
 
 	// calculate pixel size of the gaussian
 	float occ = opacities[idx];
-	float level_set = -2 * log(1 / (255.0f * occ));
-	level_set = max(0.0f, level_set);    // negative level set when gaussian opacity is too low
-	float dx = sqrt(level_set / conic.x);
-	float dy = sqrt(level_set / conic.z);
-	float pixel_size = min(dx, dy);
-	pixel_size /= scale_modifier;       // use original gaussian size for filtering, for more faithful visualization
-	pixel_sizes[idx] = pixel_size;
-	if (pixel_size < 2.0f && !base_mask[idx]) {
-	    return;
+
+	if (filter_small) {
+        float level_set = -2 * log(1 / (255.0f * occ));
+        level_set = max(0.0f, level_set);    // negative level set when gaussian opacity is too low
+        float dx = sqrt(level_set / conic.x);
+        float dy = sqrt(level_set / conic.z);
+        float pixel_size = min(dx, dy);
+        pixel_size /= scale_modifier;       // use original gaussian size for filtering, for more faithful visualization
+        pixel_sizes[idx] = pixel_size;
+        if (pixel_size < 2.0f && !base_mask[idx]) {
+            return;
+        }
+    //	else if (pixel_size < 3.0f && pixel_size >= 2.0f && !base_mask[idx]) {
+    //	    float rel_pixel_size = (pixel_size - 2.0f) / 1.0f;
+    //	    rel_pixel_size = min(1.0f, rel_pixel_size);
+    //	    occ = occ * rel_pixel_size;
+    //	}
 	}
-//	else if (pixel_size < 3.0f && pixel_size >= 2.0f && !base_mask[idx]) {
-//	    float rel_pixel_size = (pixel_size - 2.0f) / 1.0f;
-//	    rel_pixel_size = min(1.0f, rel_pixel_size);
-//	    occ = occ * rel_pixel_size;
-//	}
 
 //	printf("level set %f %f %f\n", level_set, occ, pixel_size);
 
@@ -550,7 +555,9 @@ void FORWARD::preprocess(int P, int D, int M,
 	float4* conic_opacity,
 	const dim3 grid,
 	uint32_t* tiles_touched,
-	bool prefiltered)
+	bool prefiltered,
+	const bool filter_small
+	)
 {
 	preprocessCUDA<NUM_CHANNELS> << <(P + 255) / 256, 256 >> > (
 		P, D, M,
@@ -579,6 +586,7 @@ void FORWARD::preprocess(int P, int D, int M,
 		conic_opacity,
 		grid,
 		tiles_touched,
-		prefiltered
+		prefiltered,
+		filter_small
 		);
 }
