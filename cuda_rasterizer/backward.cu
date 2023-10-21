@@ -421,15 +421,18 @@ renderCUDA(
 	const float* __restrict__ bg_color,
 	const float2* __restrict__ points_xy_image,
 	const float4* __restrict__ conic_opacity,
+	const float* __restrict__ occ_mult_interp,
 	const float* __restrict__ colors,
 	const float* __restrict__ final_Ts,
 	const uint32_t* __restrict__ n_contrib,
 	const bool* base_mask,
+	const bool filter_small,
 	const float fade_size,
 	const float* __restrict__ dL_dpixels,
 	float3* __restrict__ dL_dmean2D,
 	float4* __restrict__ dL_dconic2D,
 	float* __restrict__ dL_dopacity,
+	float* __restrict__ dL_docc_multiplier,
 	float* __restrict__ dL_dcolors)
 {
 	// We rasterize again. Compute necessary block info.
@@ -455,6 +458,9 @@ renderCUDA(
 	__shared__ float collected_colors[C * BLOCK_SIZE];
 	__shared__ float collected_pixel_size[BLOCK_SIZE];
 	__shared__ bool collected_base_mask[BLOCK_SIZE];
+	__shared__ float collected_occ_mult_interp[BLOCK_SIZE];
+	const int MAX_OCC_LVL = 4;
+	__shared__ float collected_occ_mult_ratio[MAX_OCC_LVL * BLOCK_SIZE];
 
 	// In the forward, we stored the final value for T, the
 	// product of all (1 - alpha) factors. 
@@ -506,6 +512,25 @@ renderCUDA(
             float pixel_size = min(dx, dy);
             collected_pixel_size[block.thread_rank()] = pixel_size;
             collected_base_mask[block.thread_rank()] = base_mask[coll_id];
+
+            // occ multiplier related
+            collected_occ_mult_interp[block.thread_rank()] = occ_mult_interp[coll_id];
+            for (int j = 0; j < MAX_OCC_LVL; j++) {
+                collected_occ_mult_ratio[block.thread_rank() * MAX_OCC_LVL + j] = 0.0f;
+            }
+            float occ_lvl_f = log2f(pixel_size);
+            if (occ_lvl_f <= 1.0f) {
+                collected_occ_mult_ratio[block.thread_rank() * MAX_OCC_LVL] = 1.0f;
+            } else if (occ_lvl_f >= MAX_OCC_LVL) {
+                collected_occ_mult_ratio[block.thread_rank() * MAX_OCC_LVL + MAX_OCC_LVL - 1] = 1.0f;
+            } else {
+                occ_lvl_f = min(max(occ_lvl_f, 1.0f), (float)MAX_OCC_LVL);
+                int occ_lvl = (int)occ_lvl_f;
+                float ratio_1 = occ_lvl + 1 - occ_lvl_f;
+                float ratio_2 = occ_lvl_f - occ_lvl;
+                collected_occ_mult_ratio[block.thread_rank() * MAX_OCC_LVL + occ_lvl - 1] = ratio_1;
+                collected_occ_mult_ratio[block.thread_rank() * MAX_OCC_LVL + occ_lvl] = ratio_2;
+            }
 		}
 		block.sync();
 
@@ -530,11 +555,19 @@ renderCUDA(
 //			const float alpha = min(0.99f, con_o.w * G);
 			float alpha = min(0.99f, con_o.w * G);
 
+			// apply occ mult interp
+			alpha *= collected_occ_mult_interp[j];
+
 			// scale alpha based on pixel size
 			float pixel_size = collected_pixel_size[j];
 //			float min_pixel_size_clamped = max(2.0f, min_pixel_size);   // avoid division by zero
 //			float min_pixel_size_clamped = 2.0f;
 //			pixel_size = pixel_size / min_pixel_size_clamped;
+
+            if (filter_small && pixel_size < 2.0f && !collected_base_mask[j]) {
+                continue;
+            }
+
             if (fade_size > 0 && !collected_base_mask[j]) {
                 float rel_pixel_size = (pixel_size - 2.0f) / fade_size;
                 rel_pixel_size = min(1.0f, rel_pixel_size);     // larger gaussians rendered as normal, for now
@@ -596,7 +629,12 @@ renderCUDA(
 			atomicAdd(&dL_dconic2D[global_id].w, -0.5f * gdy * d.y * dL_dG);
 
 			// Update gradients w.r.t. opacity of the Gaussian
-			atomicAdd(&(dL_dopacity[global_id]), G * dL_dalpha);
+//			atomicAdd(&(dL_dopacity[global_id]), G * dL_dalpha);
+			atomicAdd(&(dL_dopacity[global_id]), G * collected_occ_mult_interp[j] * dL_dalpha);
+			for (int lvl = 0; lvl < MAX_OCC_LVL; lvl++) {
+                atomicAdd(&(dL_docc_multiplier[global_id * MAX_OCC_LVL + lvl]),
+                    collected_occ_mult_ratio[j * MAX_OCC_LVL + lvl] * min(0.99f, con_o.w * G) * dL_dalpha);
+			}
 		}
 	}
 }
@@ -680,15 +718,18 @@ void BACKWARD::render(
 	const float* bg_color,
 	const float2* means2D,
 	const float4* conic_opacity,
+	const float* occ_mult_interp,
 	const float* colors,
 	const float* final_Ts,
 	const uint32_t* n_contrib,
 	const bool* base_mask,
+	const bool filter_small,
 	const float fade_size,
 	const float* dL_dpixels,
 	float3* dL_dmean2D,
 	float4* dL_dconic2D,
 	float* dL_dopacity,
+	float* dL_docc_multiplier,
 	float* dL_dcolors)
 {
 	renderCUDA<NUM_CHANNELS> << <grid, block >> >(
@@ -698,15 +739,18 @@ void BACKWARD::render(
 		bg_color,
 		means2D,
 		conic_opacity,
+		occ_mult_interp,
 		colors,
 		final_Ts,
 		n_contrib,
 		base_mask,
+		filter_small,
 		fade_size,
 		dL_dpixels,
 		dL_dmean2D,
 		dL_dconic2D,
 		dL_dopacity,
+		dL_docc_multiplier,
 		dL_dcolors
 		);
 }

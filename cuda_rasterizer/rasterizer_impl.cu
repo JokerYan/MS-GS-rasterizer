@@ -161,6 +161,7 @@ CudaRasterizer::GeometryState CudaRasterizer::GeometryState::fromChunk(char*& ch
 	obtain(chunk, geom.means2D, P, 128);
 	obtain(chunk, geom.cov3D, P * 6, 128);
 	obtain(chunk, geom.conic_opacity, P, 128);
+	obtain(chunk, geom.occ_mult_interp, P, 128);
 	obtain(chunk, geom.rgb, P * 3, 128);
 	obtain(chunk, geom.tiles_touched, P, 128);
 	cub::DeviceScan::InclusiveSum(nullptr, geom.scan_size, geom.tiles_touched, geom.tiles_touched, P);
@@ -206,6 +207,7 @@ int CudaRasterizer::Rasterizer::forward(
 	const float* shs,
 	const float* colors_precomp,
 	const float* opacities,
+	const float* occ_multiplier,
 	const float* scales,
 	const float scale_modifier,
 	const float* rotations,
@@ -259,6 +261,7 @@ int CudaRasterizer::Rasterizer::forward(
 		scale_modifier,
 		(glm::vec4*)rotations,
 		opacities,
+		occ_multiplier,
 		shs,
 		geomState.clamped,
 		cov3D_precomp,
@@ -276,6 +279,7 @@ int CudaRasterizer::Rasterizer::forward(
 		geomState.cov3D,
 		geomState.rgb,
 		geomState.conic_opacity,
+		geomState.occ_mult_interp,
 		tile_grid,
 		geomState.tiles_touched,
 		prefiltered,
@@ -338,6 +342,7 @@ int CudaRasterizer::Rasterizer::forward(
 		geomState.depths,
 		feature_ptr,
 		geomState.conic_opacity,
+		geomState.occ_mult_interp,
 		imgState.accum_alpha,
 		imgState.n_contrib,
 		background,
@@ -379,6 +384,7 @@ void CudaRasterizer::Rasterizer::backward(
 	float* dL_dmean2D,
 	float* dL_dconic,
 	float* dL_dopacity,
+	float* dL_docc_multiplier,
 	float* dL_dcolor,
 	float* dL_dmean3D,
 	float* dL_dcov3D,
@@ -416,15 +422,18 @@ void CudaRasterizer::Rasterizer::backward(
 		background,
 		geomState.means2D,
 		geomState.conic_opacity,
+		geomState.occ_mult_interp,
 		color_ptr,
 		imgState.accum_alpha,
 		imgState.n_contrib,
 		base_mask,
+		filter_small,
 		fade_size,
 		dL_dpix,
 		(float3*)dL_dmean2D,
 		(float4*)dL_dconic,
 		dL_dopacity,
+		dL_docc_multiplier,
 		dL_dcolor
 		), debug)
 

@@ -28,15 +28,18 @@ namespace BACKWARD
 		const float* bg_color,
 		const float2* means2D,
 		const float4* conic_opacity,
+		const float* occ_mult_interp,
 		const float* colors,
 		const float* final_Ts,
 		const uint32_t* n_contrib,
 		const bool* base_mask,
+		const bool filter_small,
 		const float fade_size,
 		const float* dL_dpixels,
 		float3* dL_dmean2D,
 		float4* dL_dconic2D,
 		float* dL_dopacity,
+		float* dL_docc_multiplier,
 		float* dL_dcolors);
 
 	void preprocess(

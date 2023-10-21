@@ -136,6 +136,11 @@ __forceinline__ __device__ float sigmoid(float x)
 	return 1.0f / (1.0f + expf(-x));
 }
 
+__forceinline__ __device__ float clip(float x, float min=0.0f, float max=1.0f)
+{
+    return fminf(fmaxf(x, min), max);
+}
+
 __forceinline__ __device__ bool in_frustum(int idx,
 	const float* orig_points,
 	const float* viewmatrix,
