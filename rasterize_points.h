@@ -22,6 +22,7 @@ RasterizeGaussiansCUDA(
     const torch::Tensor& colors,
     const torch::Tensor& opacity,
     const torch::Tensor& occ_multiplier,
+    const torch::Tensor& dc_delta,
 	const torch::Tensor& scales,
 	const torch::Tensor& rotations,
 	const float scale_modifier,
@@ -42,7 +43,8 @@ RasterizeGaussiansCUDA(
 	const bool debug
 	);
 
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor,
+            torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
  RasterizeGaussiansBackwardCUDA(
  	const torch::Tensor& background,
 	const torch::Tensor& means3D,

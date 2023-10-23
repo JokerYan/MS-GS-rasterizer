@@ -52,6 +52,7 @@ namespace BACKWARD
 		const glm::vec3* scales,
 		const glm::vec4* rotations,
 		const float scale_modifier,
+		const float* dc_delta_interp,
 		const float* cov3Ds,
 		const bool* base_mask,
 		const float* view,
@@ -66,6 +67,7 @@ namespace BACKWARD
 		float* dL_dcolor,
 		float* dL_dcov3D,
 		float* dL_dsh,
+		float* dL_ddc_delta,
 		glm::vec3* dL_dscale,
 		glm::vec4* dL_drot);
 }

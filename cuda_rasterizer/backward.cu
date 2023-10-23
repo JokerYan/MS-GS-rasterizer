@@ -354,6 +354,7 @@ __global__ void preprocessCUDA(
 	const glm::vec3* scales,
 	const glm::vec4* rotations,
 	const float scale_modifier,
+	const float* dc_delta_interp,
 	const bool* base_mask,
 	const float* proj,
 	const glm::vec3* campos,
@@ -363,6 +364,7 @@ __global__ void preprocessCUDA(
 	float* dL_dcolor,
 	float* dL_dcov3D,
 	float* dL_dsh,
+	float* dL_ddc_delta,
 	glm::vec3* dL_dscale,
 	glm::vec4* dL_drot)
 {
@@ -370,17 +372,34 @@ __global__ void preprocessCUDA(
 	if (idx >= P || !(radii[idx] > 0))
 		return;
 
+    // filter out small gaussians, same as forward
+    float occ = conic_opacity[idx].w;
+    float level_set = -2 * log(1 / (255.0f * occ));
+    level_set = max(0.0f, level_set);
+    float dx = sqrt(level_set / conic_opacity[idx].x);
+    float dy = sqrt(level_set / conic_opacity[idx].y);
+    float pixel_size = min(dx, dy);
     if (filter_small) {
-        // filter out small gaussians, same as forward
-        float occ = conic_opacity[idx].w;
-        float level_set = -2 * log(1 / (255.0f * occ));
-        level_set = max(0.0f, level_set);
-        float dx = sqrt(level_set / conic_opacity[idx].x);
-        float dy = sqrt(level_set / conic_opacity[idx].y);
-        float pixel_size = min(dx, dy);
         if (pixel_size < 2.0f && !base_mask[idx]) {
             return;
         }
+    }
+
+    // dc delta related
+	const int MAX_DC_LVL = 4;
+	float dc_delta_ratio[MAX_DC_LVL] = {0};
+    float dc_lvl_f = log2f(pixel_size);
+    if (dc_lvl_f <= 1) {
+        dc_delta_ratio[0] = 1.0f;
+    } else if (dc_lvl_f >= MAX_DC_LVL) {
+        dc_delta_ratio[MAX_DC_LVL - 1] = 1.0f;
+    } else {
+        dc_lvl_f = min(max(dc_lvl_f, 1.0f), (float)MAX_DC_LVL);
+        int dc_lvl = (int)dc_lvl_f;
+        float ratio_1 = dc_lvl + 1 - dc_lvl_f;
+        float ratio_2 = dc_lvl_f - dc_lvl;
+        dc_delta_ratio[dc_lvl - 1] = ratio_1;
+        dc_delta_ratio[dc_lvl] = ratio_2;
     }
 
 	float3 m = means[idx];
@@ -405,6 +424,12 @@ __global__ void preprocessCUDA(
 	// Compute gradient updates due to computing colors from SHs
 	if (shs)
 		computeColorFromSH(idx, D, M, (glm::vec3*)means, *campos, shs, clamped, (glm::vec3*)dL_dcolor, (glm::vec3*)dL_dmeans, (glm::vec3*)dL_dsh);
+        // since sh_dc and dc_delta are summed together, their gradient are the same
+        for (int i = 0; i < MAX_DC_LVL; i++) {
+            dL_ddc_delta[idx * MAX_DC_LVL * 3 + i * 3] = dL_dsh[idx * M * 3] * dc_delta_ratio[i];
+            dL_ddc_delta[idx * MAX_DC_LVL * 3 + i * 3 + 1] = dL_dsh[idx * M * 3 + 1] * dc_delta_ratio[i];
+            dL_ddc_delta[idx * MAX_DC_LVL * 3 + i * 3 + 2] = dL_dsh[idx * M * 3 + 2] * dc_delta_ratio[i];
+        }
 
 	// Compute gradient updates due to computing covariance from scale/rotation
 	if (scales)
@@ -649,6 +674,7 @@ void BACKWARD::preprocess(
 	const glm::vec3* scales,
 	const glm::vec4* rotations,
 	const float scale_modifier,
+	const float* dc_delta_interp,
 	const float* cov3Ds,
 	const bool* base_mask,
 	const float* viewmatrix,
@@ -663,6 +689,7 @@ void BACKWARD::preprocess(
 	float* dL_dcolor,
 	float* dL_dcov3D,
 	float* dL_dsh,
+	float* dL_ddc_delta,
 	glm::vec3* dL_dscale,
 	glm::vec4* dL_drot)
 {
@@ -697,6 +724,7 @@ void BACKWARD::preprocess(
 		(glm::vec3*)scales,
 		(glm::vec4*)rotations,
 		scale_modifier,
+		dc_delta_interp,
 		base_mask,
 		projmatrix,
 		campos,
@@ -706,6 +734,7 @@ void BACKWARD::preprocess(
 		dL_dcolor,
 		dL_dcov3D,
 		dL_dsh,
+		dL_ddc_delta,
 		dL_dscale,
 		dL_drot);
 }

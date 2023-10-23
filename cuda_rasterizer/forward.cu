@@ -18,7 +18,8 @@ namespace cg = cooperative_groups;
 
 // Forward method for converting the input spherical harmonics
 // coefficients of each Gaussian to a simple RGB color.
-__device__ glm::vec3 computeColorFromSH(int idx, int deg, int max_coeffs, const glm::vec3* means, glm::vec3 campos, const float* shs, bool* clamped)
+__device__ glm::vec3 computeColorFromSH(int idx, int deg, int max_coeffs, const glm::vec3* means, glm::vec3 campos,
+                                        const float* shs, const float* dc_delta_interp, bool* clamped)
 {
 	// The implementation is loosely based on code for 
 	// "Differentiable Point-Based Radiance Fields for 
@@ -28,7 +29,9 @@ __device__ glm::vec3 computeColorFromSH(int idx, int deg, int max_coeffs, const 
 	dir = dir / glm::length(dir);
 
 	glm::vec3* sh = ((glm::vec3*)shs) + idx * max_coeffs;
-	glm::vec3 result = SH_C0 * sh[0];
+	glm::vec3* dc_delta_vec = ((glm::vec3*)dc_delta_interp) + idx;
+	glm::vec3 result = SH_C0 * (sh[0] + dc_delta_vec[0]);
+//	glm::vec3 result = SH_C0 * sh[0];
 
 	if (deg > 0)
 	{
@@ -161,6 +164,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	const glm::vec4* rotations,
 	const float* opacities,
 	const float* occ_multiplier,
+	const float* dc_delta,
 	const float* shs,
 	bool* clamped,
 	const float* cov3D_precomp,
@@ -180,6 +184,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float* rgb,
 	float4* conic_opacity,
 	float* occ_mult_interp,
+	float* dc_delta_interp,
 	const dim3 grid,
 	uint32_t* tiles_touched,
 	bool prefiltered,
@@ -270,6 +275,37 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	}
 	occ_mult_interp[idx] = occ_mult;
 
+	// calculate dc delta
+	const int MAX_DC_LVL = 4;
+	float dc_del_0 = 0.0f;
+	float dc_del_1 = 0.0f;
+	float dc_del_2 = 0.0f;
+	float dc_lvl_f = log2f(pixel_size);
+	if (dc_lvl_f <= 1.0f) {
+	    dc_del_0 = dc_delta[idx * MAX_DC_LVL * 3];
+	    dc_del_1 = dc_delta[idx * MAX_DC_LVL * 3 + 1];
+	    dc_del_2 = dc_delta[idx * MAX_DC_LVL * 3 + 2];
+	} else if (dc_lvl_f >= MAX_DC_LVL) {
+	    dc_del_0 = dc_delta[idx * MAX_DC_LVL * 3 + (MAX_DC_LVL - 1) * 3];
+	    dc_del_1 = dc_delta[idx * MAX_DC_LVL * 3 + (MAX_DC_LVL - 1) * 3 + 1];
+	    dc_del_2 = dc_delta[idx * MAX_DC_LVL * 3 + (MAX_DC_LVL - 1) * 3 + 2];
+	} else {
+	    dc_lvl_f = min(max(dc_lvl_f, 1.0f), (float)MAX_DC_LVL);
+	    int dc_lvl = (int)dc_lvl_f;
+	    float dc_del_0_1 = dc_delta[idx * MAX_DC_LVL * 3 + (dc_lvl - 1) * 3];
+	    float dc_del_1_1 = dc_delta[idx * MAX_DC_LVL * 3 + (dc_lvl - 1) * 3 + 1];
+	    float dc_del_2_1 = dc_delta[idx * MAX_DC_LVL * 3 + (dc_lvl - 1) * 3 + 2];
+	    float dc_del_0_2 = dc_delta[idx * MAX_DC_LVL * 3 + dc_lvl * 3];
+	    float dc_del_1_2 = dc_delta[idx * MAX_DC_LVL * 3 + dc_lvl * 3 + 1];
+	    float dc_del_2_2 = dc_delta[idx * MAX_DC_LVL * 3 + dc_lvl * 3 + 2];
+	    dc_del_0 = dc_del_0_1 * (dc_lvl + 1 - dc_lvl_f) + dc_del_0_2 * (dc_lvl_f - dc_lvl);
+	    dc_del_1 = dc_del_1_1 * (dc_lvl + 1 - dc_lvl_f) + dc_del_1_2 * (dc_lvl_f - dc_lvl);
+	    dc_del_2 = dc_del_2_1 * (dc_lvl + 1 - dc_lvl_f) + dc_del_2_2 * (dc_lvl_f - dc_lvl);
+	}
+	dc_delta_interp[idx * 3] = dc_del_0;
+	dc_delta_interp[idx * 3 + 1] = dc_del_1;
+	dc_delta_interp[idx * 3 + 2] = dc_del_2;
+
 
 //	printf("level set %f %f %f\n", level_set, occ, pixel_size);
 
@@ -291,7 +327,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	// spherical harmonics coefficients to RGB color.
 	if (colors_precomp == nullptr)
 	{
-		glm::vec3 result = computeColorFromSH(idx, D, M, (glm::vec3*)orig_points, *cam_pos, shs, clamped);
+		glm::vec3 result = computeColorFromSH(idx, D, M, (glm::vec3*)orig_points, *cam_pos, shs, dc_delta_interp, clamped);
 		rgb[idx * C + 0] = result.x;
 		rgb[idx * C + 1] = result.y;
 		rgb[idx * C + 2] = result.z;
@@ -568,6 +604,7 @@ void FORWARD::preprocess(int P, int D, int M,
 	const glm::vec4* rotations,
 	const float* opacities,
 	const float* occ_multiplier,
+	const float* dc_delta,
 	const float* shs,
 	bool* clamped,
 	const float* cov3D_precomp,
@@ -587,6 +624,7 @@ void FORWARD::preprocess(int P, int D, int M,
 	float* rgb,
 	float4* conic_opacity,
 	float* occ_mult_interp,
+	float* dc_delta_interp,
 	const dim3 grid,
 	uint32_t* tiles_touched,
 	bool prefiltered,
@@ -601,6 +639,7 @@ void FORWARD::preprocess(int P, int D, int M,
 		rotations,
 		opacities,
 		occ_multiplier,
+		dc_delta,
 		shs,
 		clamped,
 		cov3D_precomp,
@@ -620,6 +659,7 @@ void FORWARD::preprocess(int P, int D, int M,
 		rgb,
 		conic_opacity,
 		occ_mult_interp,
+		dc_delta_interp,
 		grid,
 		tiles_touched,
 		prefiltered,
