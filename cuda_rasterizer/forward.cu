@@ -169,6 +169,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	bool* clamped,
 	const float* cov3D_precomp,
 	const float* colors_precomp,
+	const float* min_pixel_sizes,
 	const bool* base_mask,
 	const float* viewmatrix,
 	const float* projmatrix,
@@ -235,21 +236,42 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float det_inv = 1.f / det;
 	float3 conic = { cov.z * det_inv, -cov.y * det_inv, cov.x * det_inv };
 
+	// conic without low pass
+	float det_ori = ((cov.x - 0.3) * (cov.z - 0.3) - cov.y * cov.y);
+	if (det_ori == 0.0f)
+        return;
+    float det_inv_ori = 1.f / det_ori;
+    float3 conic_ori = { (cov.z - 0.3) * det_inv_ori, -cov.y * det_inv_ori, (cov.x - 0.3) * det_inv_ori };
+
 	// calculate pixel size of the gaussian
 	float occ = opacities[idx];
 
     float level_set = -2 * log(1 / (255.0f * occ));
     level_set = max(0.0f, level_set);    // negative level set when gaussian opacity is too low
-    float dx = sqrt(level_set / conic.x);
-    float dy = sqrt(level_set / conic.z);
+//    float dx = sqrt(level_set / conic.x);
+//    float dy = sqrt(level_set / conic.z);
+    float dx = sqrt(level_set / conic_ori.x);
+    float dy = sqrt(level_set / conic_ori.z);
     float pixel_size = min(dx, dy);
     pixel_size /= scale_modifier;       // use original gaussian size for filtering, for more faithful visualization
     pixel_sizes[idx] = pixel_size;
 
 	if (filter_small) {
-        if (pixel_size < 2.0f && !base_mask[idx]) {
+	    float rel_pixel_size = 1.0f;
+	    if (min_pixel_sizes[idx] > 0) {
+            rel_pixel_size = pixel_size / min_pixel_sizes[idx];
+//            if (pixel_size < 1.0 && pixel_size > 0) printf("%f\n", pixel_size);
+//            if (rel_pixel_size < 0.5f) {
+//                printf("%f %f %f %f\n", pixel_size, min_pixel_sizes[idx], rel_pixel_size, base_mask[idx] ? 1.0f : 0.0f);
+//            }
+        }
+        if (rel_pixel_size < 0.5f && pixel_size < 2.0f && !base_mask[idx]) {
             return;
         }
+//        if (pixel_size < 2.0f && !base_mask[idx]) {
+//            return;
+//        }
+
     //	else if (pixel_size < 3.0f && pixel_size >= 2.0f && !base_mask[idx]) {
     //	    float rel_pixel_size = (pixel_size - 2.0f) / 1.0f;
     //	    rel_pixel_size = min(1.0f, rel_pixel_size);
@@ -415,7 +437,6 @@ renderCUDA(
 	__shared__ float2 collected_xy[BLOCK_SIZE];
 	__shared__ float4 collected_conic_opacity[BLOCK_SIZE];
 	__shared__ float collected_pixel_size[BLOCK_SIZE];
-//	__shared__ float min_pixel_size;
     __shared__ float max_pixel_size;
     max_pixel_size = 0;
     __shared__ float collected_depths[BLOCK_SIZE];
@@ -439,11 +460,6 @@ renderCUDA(
 		if (num_done == BLOCK_SIZE)
 			break;
 
-//		// sync to re-init min_pixel_size
-//		block.sync();
-//		min_pixel_size = 10000.0f;
-//		block.sync();
-
 		// Collectively fetch per-Gaussian data from global to shared
 		int progress = i * BLOCK_SIZE + block.thread_rank();
 		if (range.x + progress < range.y)
@@ -464,8 +480,6 @@ renderCUDA(
             collected_pixel_size[block.thread_rank()] = pixel_size;
             collected_base_mask[block.thread_rank()] = base_mask[coll_id];
 
-//            // update min pixel size
-//            fatomicMin(&min_pixel_size, pixel_size);
             if (occ > 0.5f) {
                 fatomicMax(&max_pixel_size, pixel_size);
             }
@@ -504,17 +518,14 @@ renderCUDA(
 
 			float pixel_size = collected_pixel_size[j];
 
-			// scale alpha based on pixel size
-//			float pixel_size = collected_pixel_size[j];
-//			float min_pixel_size_clamped = max(2.0f, min_pixel_size);   // avoid division by zero
-//			float min_pixel_size_clamped = 2.0f;
-//			pixel_size = pixel_size / min_pixel_size_clamped;
-            if (fade_size > 0 && !collected_base_mask[j]) {
-                float rel_pixel_size = (pixel_size - 2.0f) / fade_size;
-                rel_pixel_size = min(1.0f, rel_pixel_size);     // larger gaussians rendered as normal, for now
-//                alpha = alpha * rel_pixel_size;     // smaller gaussians have lower opacity
-                alpha = min(alpha, rel_pixel_size);     // smaller gaussians have lower opacity
-            }
+//			// scale alpha based on pixel size
+////			float pixel_size = collected_pixel_size[j];
+//            if (fade_size > 0 && !collected_base_mask[j]) {
+//                float rel_pixel_size = (pixel_size - 2.0f) / fade_size;
+//                rel_pixel_size = min(1.0f, rel_pixel_size);     // larger gaussians rendered as normal, for now
+////                alpha = alpha * rel_pixel_size;     // smaller gaussians have lower opacity
+//                alpha = min(alpha, rel_pixel_size);     // smaller gaussians have lower opacity
+//            }
 
 			if (alpha < 1.0f / 255.0f)
 				continue;
@@ -609,6 +620,7 @@ void FORWARD::preprocess(int P, int D, int M,
 	bool* clamped,
 	const float* cov3D_precomp,
 	const float* colors_precomp,
+	const float* min_pixel_sizes,
 	const bool* base_mask,
 	const float* viewmatrix,
 	const float* projmatrix,
@@ -644,6 +656,7 @@ void FORWARD::preprocess(int P, int D, int M,
 		clamped,
 		cov3D_precomp,
 		colors_precomp,
+		min_pixel_sizes,
 		base_mask,
 		viewmatrix, 
 		projmatrix,

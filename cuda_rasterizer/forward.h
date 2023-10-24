@@ -33,6 +33,7 @@ namespace FORWARD
 		bool* clamped,
 		const float* cov3D_precomp,
 		const float* colors_precomp,
+		const float* min_pixel_sizes,
 		const bool* base_mask,
 		const float* viewmatrix,
 		const float* projmatrix,

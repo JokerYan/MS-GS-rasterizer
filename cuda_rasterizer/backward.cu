@@ -197,6 +197,9 @@ __global__ void computeCov2DCUDA(int P,
 	float a = cov2D[0][0] += 0.3f;
 	float b = cov2D[0][1];
 	float c = cov2D[1][1] += 0.3f;
+//	float a = cov2D[0][0];
+//	float b = cov2D[0][1];
+//	float c = cov2D[1][1]f;
 
 	float denom = a * c - b * b;
 	float dL_da = 0, dL_db = 0, dL_dc = 0;
@@ -349,6 +352,8 @@ __global__ void preprocessCUDA(
 	const float3* means,
 	const float4* conic_opacity,
 	const int* radii,
+	const float* pixel_sizes,
+    const float* min_pixel_sizes,
 	const float* shs,
 	const bool* clamped,
 	const glm::vec3* scales,
@@ -373,16 +378,24 @@ __global__ void preprocessCUDA(
 		return;
 
     // filter out small gaussians, same as forward
-    float occ = conic_opacity[idx].w;
-    float level_set = -2 * log(1 / (255.0f * occ));
-    level_set = max(0.0f, level_set);
-    float dx = sqrt(level_set / conic_opacity[idx].x);
-    float dy = sqrt(level_set / conic_opacity[idx].y);
-    float pixel_size = min(dx, dy);
+//    float occ = conic_opacity[idx].w;
+//    float level_set = -2 * log(1 / (255.0f * occ));
+//    level_set = max(0.0f, level_set);
+//    float dx = sqrt(level_set / conic_opacity[idx].x);
+//    float dy = sqrt(level_set / conic_opacity[idx].y);
+//    float pixel_size = min(dx, dy);
+    float pixel_size = pixel_sizes[idx];
     if (filter_small) {
-        if (pixel_size < 2.0f && !base_mask[idx]) {
+	    float rel_pixel_size = 1.0f;
+	    if (min_pixel_sizes[idx] > 0) {
+            rel_pixel_size = pixel_size / min_pixel_sizes[idx];
+        }
+        if (rel_pixel_size < 0.5f && pixel_size < 2.0f && !base_mask[idx]) {
             return;
         }
+//        if (pixel_size < 2.0f && !base_mask[idx]) {
+//            return;
+//        }
     }
 
     // dc delta related
@@ -448,6 +461,8 @@ renderCUDA(
 	const float4* __restrict__ conic_opacity,
 	const float* __restrict__ occ_mult_interp,
 	const float* __restrict__ colors,
+	const float* __restrict__ pixel_sizes,
+	const float* __restrict__ min_pixel_sizes,
 	const float* __restrict__ final_Ts,
 	const uint32_t* __restrict__ n_contrib,
 	const bool* base_mask,
@@ -482,6 +497,7 @@ renderCUDA(
 	__shared__ float4 collected_conic_opacity[BLOCK_SIZE];
 	__shared__ float collected_colors[C * BLOCK_SIZE];
 	__shared__ float collected_pixel_size[BLOCK_SIZE];
+	__shared__ float collected_rel_pixel_size[BLOCK_SIZE];
 	__shared__ bool collected_base_mask[BLOCK_SIZE];
 	__shared__ float collected_occ_mult_interp[BLOCK_SIZE];
 	const int MAX_OCC_LVL = 4;
@@ -527,15 +543,22 @@ renderCUDA(
 			for (int i = 0; i < C; i++)
 				collected_colors[i * BLOCK_SIZE + block.thread_rank()] = colors[coll_id * C + i];
 
-			// calculate pixel size
-			float4 conic = conic_opacity[coll_id];
-            float occ = conic.w;
-            float level_set = -2 * log(1 / (255.0f * occ));
-            level_set = max(0.0f, level_set);    // negative level set when gaussian opacity is too low
-            float dx = sqrt(level_set / conic.x);
-            float dy = sqrt(level_set / conic.z);
-            float pixel_size = min(dx, dy);
+//			// calculate pixel size
+//			float4 conic = conic_opacity[coll_id];
+//            float occ = conic.w;
+//            float level_set = -2 * log(1 / (255.0f * occ));
+//            level_set = max(0.0f, level_set);    // negative level set when gaussian opacity is too low
+//            float dx = sqrt(level_set / conic.x);
+//            float dy = sqrt(level_set / conic.z);
+//            float pixel_size = min(dx, dy);
+//            collected_pixel_size[block.thread_rank()] = pixel_size;
+            float pixel_size = pixel_sizes[coll_id];
             collected_pixel_size[block.thread_rank()] = pixel_size;
+            float rel_pixel_size = 1.0f;
+            if (min_pixel_sizes[coll_id] > 0) {
+                rel_pixel_size = pixel_size / min_pixel_sizes[coll_id];
+            }
+            collected_rel_pixel_size[block.thread_rank()] = rel_pixel_size;
             collected_base_mask[block.thread_rank()] = base_mask[coll_id];
 
             // occ multiplier related
@@ -585,20 +608,21 @@ renderCUDA(
 
 			// scale alpha based on pixel size
 			float pixel_size = collected_pixel_size[j];
-//			float min_pixel_size_clamped = max(2.0f, min_pixel_size);   // avoid division by zero
-//			float min_pixel_size_clamped = 2.0f;
-//			pixel_size = pixel_size / min_pixel_size_clamped;
+			float rel_pixel_size = collected_rel_pixel_size[j];
 
-            if (filter_small && pixel_size < 2.0f && !collected_base_mask[j]) {
+            if (filter_small
+                && pixel_size < 0.5
+                && pixel_size < 2.0f
+                && !collected_base_mask[j]) {
                 continue;
             }
 
-            if (fade_size > 0 && !collected_base_mask[j]) {
-                float rel_pixel_size = (pixel_size - 2.0f) / fade_size;
-                rel_pixel_size = min(1.0f, rel_pixel_size);     // larger gaussians rendered as normal, for now
-//                alpha = alpha * rel_pixel_size;     // smaller gaussians have lower opacity
-                alpha = min(alpha, rel_pixel_size);     // smaller gaussians have lower opacity
-            }
+//            if (fade_size > 0 && !collected_base_mask[j]) {
+//                float rel_pixel_size = (pixel_size - 2.0f) / fade_size;
+//                rel_pixel_size = min(1.0f, rel_pixel_size);     // larger gaussians rendered as normal, for now
+////                alpha = alpha * rel_pixel_size;     // smaller gaussians have lower opacity
+//                alpha = min(alpha, rel_pixel_size);     // smaller gaussians have lower opacity
+//            }
 
 			if (alpha < 1.0f / 255.0f)
 				continue;
@@ -669,6 +693,8 @@ void BACKWARD::preprocess(
 	const float3* means3D,
 	const float4* conic_opacity,
 	const int* radii,
+	const float* pixel_sizes,
+    const float* min_pixel_sizes,
 	const float* shs,
 	const bool* clamped,
 	const glm::vec3* scales,
@@ -719,6 +745,8 @@ void BACKWARD::preprocess(
 		(float3*)means3D,
 		conic_opacity,
 		radii,
+		pixel_sizes,
+		min_pixel_sizes,
 		shs,
 		clamped,
 		(glm::vec3*)scales,
@@ -749,6 +777,8 @@ void BACKWARD::render(
 	const float4* conic_opacity,
 	const float* occ_mult_interp,
 	const float* colors,
+	const float* pixel_sizes,
+    const float* min_pixel_sizes,
 	const float* final_Ts,
 	const uint32_t* n_contrib,
 	const bool* base_mask,
@@ -770,6 +800,8 @@ void BACKWARD::render(
 		conic_opacity,
 		occ_mult_interp,
 		colors,
+		pixel_sizes,
+		min_pixel_sizes,
 		final_Ts,
 		n_contrib,
 		base_mask,
