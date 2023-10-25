@@ -169,6 +169,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	bool* clamped,
 	const float* cov3D_precomp,
 	const float* colors_precomp,
+	const float* max_pixel_sizes,
 	const float* min_pixel_sizes,
 	const bool* base_mask,
 	const float* viewmatrix,
@@ -256,26 +257,32 @@ __global__ void preprocessCUDA(int P, int D, int M,
     pixel_size /= scale_modifier;       // use original gaussian size for filtering, for more faithful visualization
     pixel_sizes[idx] = pixel_size;
 
-    float rel_pixel_size = 1.0f;
+    float rel_min_pixel_size = 1.0f;
     if (min_pixel_sizes[idx] > 0) {
-        rel_pixel_size = pixel_size / min_pixel_sizes[idx];
-//            if (pixel_size < 1.0 && pixel_size > 0) printf("%f\n", pixel_size);
-//            if (rel_pixel_size < 0.5f) {
-//                printf("%f %f %f %f\n", pixel_size, min_pixel_sizes[idx], rel_pixel_size, base_mask[idx] ? 1.0f : 0.0f);
-//            }
+        rel_min_pixel_size = pixel_size / min_pixel_sizes[idx];
     }
+    float rel_max_pixel_size = 1.0f;
+    if (max_pixel_sizes[idx] > 0) {
+        rel_max_pixel_size = pixel_size / max_pixel_sizes[idx];
+    }
+
 	if (filter_small) {
-        if (rel_pixel_size < 0.5f && pixel_size < 2.0f && !base_mask[idx]) {
+        if (rel_min_pixel_size < 0.5f && pixel_size < 2.0f && !base_mask[idx]) {
             return;
         }
 //        if (pixel_size < 2.0f && !base_mask[idx]) {
 //            return;
 //        }
 
+    if (rel_max_pixel_size > 2.0f && !base_mask[idx]) {
+        return;
+    }
+
+
     //	else if (pixel_size < 3.0f && pixel_size >= 2.0f && !base_mask[idx]) {
-    //	    float rel_pixel_size = (pixel_size - 2.0f) / 1.0f;
-    //	    rel_pixel_size = min(1.0f, rel_pixel_size);
-    //	    occ = occ * rel_pixel_size;
+    //	    float rel_min_pixel_size = (pixel_size - 2.0f) / 1.0f;
+    //	    rel_min_pixel_size = min(1.0f, rel_min_pixel_size);
+    //	    occ = occ * rel_min_pixel_size;
     //	}
 	}
 
@@ -283,7 +290,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	const int MAX_OCC_LVL = 4;
 	float occ_mult = 1.0f;
 //	float occ_lvl_f = log2f(pixel_size);
-	float occ_lvl_f = log2f(rel_pixel_size) / 2.0f + 3.0f;
+	float occ_lvl_f = log2f(rel_min_pixel_size) / 2.0f + 3.0f;
 	if (occ_lvl_f <= 1.0f) {
 	    occ_mult = occ_multiplier[idx * MAX_OCC_LVL];
 	} else if (occ_lvl_f >= MAX_OCC_LVL) {
@@ -304,7 +311,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float dc_del_1 = 0.0f;
 	float dc_del_2 = 0.0f;
 //	float dc_lvl_f = log2f(pixel_size);
-	float dc_lvl_f = log2f(rel_pixel_size) / 2.0f + 3.0f;
+	float dc_lvl_f = log2f(rel_min_pixel_size) / 2.0f + 3.0f;
 	if (dc_lvl_f <= 1.0f) {
 	    dc_del_0 = dc_delta[idx * MAX_DC_LVL * 3];
 	    dc_del_1 = dc_delta[idx * MAX_DC_LVL * 3 + 1];
@@ -523,10 +530,10 @@ renderCUDA(
 //			// scale alpha based on pixel size
 ////			float pixel_size = collected_pixel_size[j];
 //            if (fade_size > 0 && !collected_base_mask[j]) {
-//                float rel_pixel_size = (pixel_size - 2.0f) / fade_size;
-//                rel_pixel_size = min(1.0f, rel_pixel_size);     // larger gaussians rendered as normal, for now
-////                alpha = alpha * rel_pixel_size;     // smaller gaussians have lower opacity
-//                alpha = min(alpha, rel_pixel_size);     // smaller gaussians have lower opacity
+//                float rel_min_pixel_size = (pixel_size - 2.0f) / fade_size;
+//                rel_min_pixel_size = min(1.0f, rel_min_pixel_size);     // larger gaussians rendered as normal, for now
+////                alpha = alpha * rel_min_pixel_size;     // smaller gaussians have lower opacity
+//                alpha = min(alpha, rel_min_pixel_size);     // smaller gaussians have lower opacity
 //            }
 
 			if (alpha < 1.0f / 255.0f)
@@ -622,6 +629,7 @@ void FORWARD::preprocess(int P, int D, int M,
 	bool* clamped,
 	const float* cov3D_precomp,
 	const float* colors_precomp,
+	const float* max_pixel_sizes,
 	const float* min_pixel_sizes,
 	const bool* base_mask,
 	const float* viewmatrix,
@@ -658,6 +666,7 @@ void FORWARD::preprocess(int P, int D, int M,
 		clamped,
 		cov3D_precomp,
 		colors_precomp,
+		max_pixel_sizes,
 		min_pixel_sizes,
 		base_mask,
 		viewmatrix, 

@@ -353,6 +353,7 @@ __global__ void preprocessCUDA(
 	const float4* conic_opacity,
 	const int* radii,
 	const float* pixel_sizes,
+	const float* max_pixel_sizes,
     const float* min_pixel_sizes,
 	const float* shs,
 	const bool* clamped,
@@ -385,12 +386,17 @@ __global__ void preprocessCUDA(
 //    float dy = sqrt(level_set / conic_opacity[idx].y);
 //    float pixel_size = min(dx, dy);
     float pixel_size = pixel_sizes[idx];
-    float rel_pixel_size = 1.0f;
+    float rel_min_pixel_size = 1.0f;
     if (min_pixel_sizes[idx] > 0) {
-        rel_pixel_size = pixel_size / min_pixel_sizes[idx];
+        rel_min_pixel_size = pixel_size / min_pixel_sizes[idx];
     }
+    float rel_max_pixel_size = 1.0f;
+    if (max_pixel_sizes[idx] > 0) {
+        rel_max_pixel_size = pixel_size / max_pixel_sizes[idx];
+    }
+
     if (filter_small) {
-        if (rel_pixel_size < 0.5f && pixel_size < 2.0f && !base_mask[idx]) {
+        if (rel_min_pixel_size < 0.5f && pixel_size < 2.0f && !base_mask[idx]) {
             return;
         }
 //        if (pixel_size < 2.0f && !base_mask[idx]) {
@@ -398,11 +404,17 @@ __global__ void preprocessCUDA(
 //        }
     }
 
+    if (rel_max_pixel_size > 2.0f && !base_mask[idx]) {
+        return;
+    }
+
+
+
     // dc delta related
 	const int MAX_DC_LVL = 4;
 	float dc_delta_ratio[MAX_DC_LVL] = {0};
 //    float dc_lvl_f = log2f(pixel_size);
-    float dc_lvl_f = log2f(rel_pixel_size) / 2.0f + 3.0f;
+    float dc_lvl_f = log2f(rel_min_pixel_size) / 2.0f + 3.0f;
     if (dc_lvl_f <= 1) {
         dc_delta_ratio[0] = 1.0f;
     } else if (dc_lvl_f >= MAX_DC_LVL) {
@@ -463,6 +475,7 @@ renderCUDA(
 	const float* __restrict__ occ_mult_interp,
 	const float* __restrict__ colors,
 	const float* __restrict__ pixel_sizes,
+	const float* __restrict__ max_pixel_sizes,
 	const float* __restrict__ min_pixel_sizes,
 	const float* __restrict__ final_Ts,
 	const uint32_t* __restrict__ n_contrib,
@@ -498,7 +511,8 @@ renderCUDA(
 	__shared__ float4 collected_conic_opacity[BLOCK_SIZE];
 	__shared__ float collected_colors[C * BLOCK_SIZE];
 	__shared__ float collected_pixel_size[BLOCK_SIZE];
-	__shared__ float collected_rel_pixel_size[BLOCK_SIZE];
+	__shared__ float collected_rel_min_pixel_size[BLOCK_SIZE];
+	__shared__ float collected_rel_max_pixel_size[BLOCK_SIZE];
 	__shared__ bool collected_base_mask[BLOCK_SIZE];
 	__shared__ float collected_occ_mult_interp[BLOCK_SIZE];
 	const int MAX_OCC_LVL = 4;
@@ -555,11 +569,17 @@ renderCUDA(
 //            collected_pixel_size[block.thread_rank()] = pixel_size;
             float pixel_size = pixel_sizes[coll_id];
             collected_pixel_size[block.thread_rank()] = pixel_size;
-            float rel_pixel_size = 1.0f;
+            float rel_min_pixel_size = 1.0f;
             if (min_pixel_sizes[coll_id] > 0) {
-                rel_pixel_size = pixel_size / min_pixel_sizes[coll_id];
+                rel_min_pixel_size = pixel_size / min_pixel_sizes[coll_id];
             }
-            collected_rel_pixel_size[block.thread_rank()] = rel_pixel_size;
+            float rel_max_pixel_size = 1.0f;
+            if (max_pixel_sizes[coll_id] > 0) {
+                rel_max_pixel_size = pixel_size / max_pixel_sizes[coll_id];
+            }
+
+            collected_rel_min_pixel_size[block.thread_rank()] = rel_min_pixel_size;
+            collected_rel_max_pixel_size[block.thread_rank()] = rel_max_pixel_size;
             collected_base_mask[block.thread_rank()] = base_mask[coll_id];
 
             // occ multiplier related
@@ -568,7 +588,7 @@ renderCUDA(
                 collected_occ_mult_ratio[block.thread_rank() * MAX_OCC_LVL + j] = 0.0f;
             }
 //            float occ_lvl_f = log2f(pixel_size);
-            float occ_lvl_f = log2f(rel_pixel_size) / 2.0f + 3.0f;
+            float occ_lvl_f = log2f(rel_min_pixel_size) / 2.0f + 3.0f;
             if (occ_lvl_f <= 1.0f) {
                 collected_occ_mult_ratio[block.thread_rank() * MAX_OCC_LVL] = 1.0f;
             } else if (occ_lvl_f >= MAX_OCC_LVL) {
@@ -610,20 +630,25 @@ renderCUDA(
 
 			// scale alpha based on pixel size
 			float pixel_size = collected_pixel_size[j];
-			float rel_pixel_size = collected_rel_pixel_size[j];
+			float rel_min_pixel_size = collected_rel_min_pixel_size[j];
+			float rel_max_pixel_size = collected_rel_max_pixel_size[j];
 
             if (filter_small
-                && pixel_size < 0.5
+                && rel_min_pixel_size < 0.5
                 && pixel_size < 2.0f
                 && !collected_base_mask[j]) {
                 continue;
             }
 
+            if (rel_max_pixel_size > 2.0f && !collected_base_mask[j]) {
+                continue;
+            }
+
 //            if (fade_size > 0 && !collected_base_mask[j]) {
-//                float rel_pixel_size = (pixel_size - 2.0f) / fade_size;
-//                rel_pixel_size = min(1.0f, rel_pixel_size);     // larger gaussians rendered as normal, for now
-////                alpha = alpha * rel_pixel_size;     // smaller gaussians have lower opacity
-//                alpha = min(alpha, rel_pixel_size);     // smaller gaussians have lower opacity
+//                float rel_min_pixel_size = (pixel_size - 2.0f) / fade_size;
+//                rel_min_pixel_size = min(1.0f, rel_min_pixel_size);     // larger gaussians rendered as normal, for now
+////                alpha = alpha * rel_min_pixel_size;     // smaller gaussians have lower opacity
+//                alpha = min(alpha, rel_min_pixel_size);     // smaller gaussians have lower opacity
 //            }
 
 			if (alpha < 1.0f / 255.0f)
@@ -696,6 +721,7 @@ void BACKWARD::preprocess(
 	const float4* conic_opacity,
 	const int* radii,
 	const float* pixel_sizes,
+	const float* max_pixel_sizes,
     const float* min_pixel_sizes,
 	const float* shs,
 	const bool* clamped,
@@ -748,6 +774,7 @@ void BACKWARD::preprocess(
 		conic_opacity,
 		radii,
 		pixel_sizes,
+		max_pixel_sizes,
 		min_pixel_sizes,
 		shs,
 		clamped,
@@ -780,6 +807,7 @@ void BACKWARD::render(
 	const float* occ_mult_interp,
 	const float* colors,
 	const float* pixel_sizes,
+	const float* max_pixel_sizes,
     const float* min_pixel_sizes,
 	const float* final_Ts,
 	const uint32_t* n_contrib,
@@ -803,6 +831,7 @@ void BACKWARD::render(
 		occ_mult_interp,
 		colors,
 		pixel_sizes,
+		max_pixel_sizes,
 		min_pixel_sizes,
 		final_Ts,
 		n_contrib,
