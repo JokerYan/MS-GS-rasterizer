@@ -385,11 +385,11 @@ __global__ void preprocessCUDA(
 //    float dy = sqrt(level_set / conic_opacity[idx].y);
 //    float pixel_size = min(dx, dy);
     float pixel_size = pixel_sizes[idx];
+    float rel_pixel_size = 1.0f;
+    if (min_pixel_sizes[idx] > 0) {
+        rel_pixel_size = pixel_size / min_pixel_sizes[idx];
+    }
     if (filter_small) {
-	    float rel_pixel_size = 1.0f;
-	    if (min_pixel_sizes[idx] > 0) {
-            rel_pixel_size = pixel_size / min_pixel_sizes[idx];
-        }
         if (rel_pixel_size < 0.5f && pixel_size < 2.0f && !base_mask[idx]) {
             return;
         }
@@ -401,7 +401,8 @@ __global__ void preprocessCUDA(
     // dc delta related
 	const int MAX_DC_LVL = 4;
 	float dc_delta_ratio[MAX_DC_LVL] = {0};
-    float dc_lvl_f = log2f(pixel_size);
+//    float dc_lvl_f = log2f(pixel_size);
+    float dc_lvl_f = log2f(rel_pixel_size) / 2.0f + 3.0f;
     if (dc_lvl_f <= 1) {
         dc_delta_ratio[0] = 1.0f;
     } else if (dc_lvl_f >= MAX_DC_LVL) {
@@ -566,7 +567,8 @@ renderCUDA(
             for (int j = 0; j < MAX_OCC_LVL; j++) {
                 collected_occ_mult_ratio[block.thread_rank() * MAX_OCC_LVL + j] = 0.0f;
             }
-            float occ_lvl_f = log2f(pixel_size);
+//            float occ_lvl_f = log2f(pixel_size);
+            float occ_lvl_f = log2f(rel_pixel_size) / 2.0f + 3.0f;
             if (occ_lvl_f <= 1.0f) {
                 collected_occ_mult_ratio[block.thread_rank() * MAX_OCC_LVL] = 1.0f;
             } else if (occ_lvl_f >= MAX_OCC_LVL) {

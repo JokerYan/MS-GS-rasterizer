@@ -256,15 +256,15 @@ __global__ void preprocessCUDA(int P, int D, int M,
     pixel_size /= scale_modifier;       // use original gaussian size for filtering, for more faithful visualization
     pixel_sizes[idx] = pixel_size;
 
-	if (filter_small) {
-	    float rel_pixel_size = 1.0f;
-	    if (min_pixel_sizes[idx] > 0) {
-            rel_pixel_size = pixel_size / min_pixel_sizes[idx];
+    float rel_pixel_size = 1.0f;
+    if (min_pixel_sizes[idx] > 0) {
+        rel_pixel_size = pixel_size / min_pixel_sizes[idx];
 //            if (pixel_size < 1.0 && pixel_size > 0) printf("%f\n", pixel_size);
 //            if (rel_pixel_size < 0.5f) {
 //                printf("%f %f %f %f\n", pixel_size, min_pixel_sizes[idx], rel_pixel_size, base_mask[idx] ? 1.0f : 0.0f);
 //            }
-        }
+    }
+	if (filter_small) {
         if (rel_pixel_size < 0.5f && pixel_size < 2.0f && !base_mask[idx]) {
             return;
         }
@@ -282,7 +282,8 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	// calculate occ mult
 	const int MAX_OCC_LVL = 4;
 	float occ_mult = 1.0f;
-	float occ_lvl_f = log2f(pixel_size);
+//	float occ_lvl_f = log2f(pixel_size);
+	float occ_lvl_f = log2f(rel_pixel_size) / 2.0f + 3.0f;
 	if (occ_lvl_f <= 1.0f) {
 	    occ_mult = occ_multiplier[idx * MAX_OCC_LVL];
 	} else if (occ_lvl_f >= MAX_OCC_LVL) {
@@ -302,7 +303,8 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float dc_del_0 = 0.0f;
 	float dc_del_1 = 0.0f;
 	float dc_del_2 = 0.0f;
-	float dc_lvl_f = log2f(pixel_size);
+//	float dc_lvl_f = log2f(pixel_size);
+	float dc_lvl_f = log2f(rel_pixel_size) / 2.0f + 3.0f;
 	if (dc_lvl_f <= 1.0f) {
 	    dc_del_0 = dc_delta[idx * MAX_DC_LVL * 3];
 	    dc_del_1 = dc_delta[idx * MAX_DC_LVL * 3 + 1];
