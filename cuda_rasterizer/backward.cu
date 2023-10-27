@@ -404,10 +404,9 @@ __global__ void preprocessCUDA(
 //        }
     }
 
-    if (rel_max_pixel_size > 2.0f && !base_mask[idx]) {
+    if (rel_max_pixel_size > 4.0f && !base_mask[idx]) {
         return;
     }
-
 
 
     // dc delta related
@@ -640,7 +639,7 @@ renderCUDA(
                 continue;
             }
 
-            if (rel_max_pixel_size > 2.0f && !collected_base_mask[j]) {
+            if (rel_max_pixel_size > 4.0f && !collected_base_mask[j]) {
                 continue;
             }
 
