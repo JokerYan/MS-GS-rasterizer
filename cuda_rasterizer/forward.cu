@@ -190,7 +190,8 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	const dim3 grid,
 	uint32_t* tiles_touched,
 	bool prefiltered,
-	const bool filter_small
+	const bool filter_small,
+	const bool filter_large
 	)
 {
 	auto idx = cg::this_grid().thread_rank();
@@ -274,8 +275,10 @@ __global__ void preprocessCUDA(int P, int D, int M,
 //            return;
 //        }
 
-    if (rel_max_pixel_size > 4.0f && !base_mask[idx]) {
-        return;
+    if (filter_large) {
+        if (rel_max_pixel_size > 4.0f && !base_mask[idx]) {
+            return;
+        }
     }
 
 
@@ -286,57 +289,64 @@ __global__ void preprocessCUDA(int P, int D, int M,
     //	}
 	}
 
-	// calculate occ mult
-	const int MAX_OCC_LVL = 4;
-	float occ_mult = 1.0f;
-//	float occ_lvl_f = log2f(pixel_size);
-	float occ_lvl_f = log2f(rel_min_pixel_size) / 2.0f + 3.0f;
-	if (occ_lvl_f <= 1.0f) {
-	    occ_mult = occ_multiplier[idx * MAX_OCC_LVL];
-	} else if (occ_lvl_f >= MAX_OCC_LVL) {
-	    occ_mult = occ_multiplier[idx * MAX_OCC_LVL + MAX_OCC_LVL - 1];
-	} else {
-        occ_lvl_f = min(max(occ_lvl_f, 1.0f), (float)MAX_OCC_LVL);
-        int occ_lvl = (int)occ_lvl_f;
-        float occ_mult_1 = occ_multiplier[idx * MAX_OCC_LVL + occ_lvl - 1];
-        float occ_mult_2 = occ_multiplier[idx * MAX_OCC_LVL + occ_lvl];
-        occ_mult = occ_mult_1 * (occ_lvl + 1 - occ_lvl_f) + occ_mult_2 * (occ_lvl_f - occ_lvl);
-//        printf("pz %f, lvl_f %f, lvl_n %f, ratio %f\n", pixel_size, occ_lvl_f, occ_lvl_f, occ_lvl + 1 - occ_lvl_f);
-	}
-	occ_mult_interp[idx] = occ_mult;
+	const bool dc_occ_mult = false;
+    const int MAX_OCC_LVL = 4;
+    const int MAX_DC_LVL = 4;
+	if (dc_occ_mult) {
+        // calculate occ mult
+        float occ_mult = 1.0f;
+    //	float occ_lvl_f = log2f(pixel_size);
+        float occ_lvl_f = log2f(rel_min_pixel_size) / 2.0f + 3.0f;
+        if (occ_lvl_f <= 1.0f) {
+            occ_mult = occ_multiplier[idx * MAX_OCC_LVL];
+        } else if (occ_lvl_f >= MAX_OCC_LVL) {
+            occ_mult = occ_multiplier[idx * MAX_OCC_LVL + MAX_OCC_LVL - 1];
+        } else {
+            occ_lvl_f = min(max(occ_lvl_f, 1.0f), (float)MAX_OCC_LVL);
+            int occ_lvl = (int)occ_lvl_f;
+            float occ_mult_1 = occ_multiplier[idx * MAX_OCC_LVL + occ_lvl - 1];
+            float occ_mult_2 = occ_multiplier[idx * MAX_OCC_LVL + occ_lvl];
+            occ_mult = occ_mult_1 * (occ_lvl + 1 - occ_lvl_f) + occ_mult_2 * (occ_lvl_f - occ_lvl);
+    //        printf("pz %f, lvl_f %f, lvl_n %f, ratio %f\n", pixel_size, occ_lvl_f, occ_lvl_f, occ_lvl + 1 - occ_lvl_f);
+        }
+        occ_mult_interp[idx] = occ_mult;
 
-	// calculate dc delta
-	const int MAX_DC_LVL = 4;
-	float dc_del_0 = 0.0f;
-	float dc_del_1 = 0.0f;
-	float dc_del_2 = 0.0f;
-//	float dc_lvl_f = log2f(pixel_size);
-	float dc_lvl_f = log2f(rel_min_pixel_size) / 2.0f + 3.0f;
-	if (dc_lvl_f <= 1.0f) {
-	    dc_del_0 = dc_delta[idx * MAX_DC_LVL * 3];
-	    dc_del_1 = dc_delta[idx * MAX_DC_LVL * 3 + 1];
-	    dc_del_2 = dc_delta[idx * MAX_DC_LVL * 3 + 2];
-	} else if (dc_lvl_f >= MAX_DC_LVL) {
-	    dc_del_0 = dc_delta[idx * MAX_DC_LVL * 3 + (MAX_DC_LVL - 1) * 3];
-	    dc_del_1 = dc_delta[idx * MAX_DC_LVL * 3 + (MAX_DC_LVL - 1) * 3 + 1];
-	    dc_del_2 = dc_delta[idx * MAX_DC_LVL * 3 + (MAX_DC_LVL - 1) * 3 + 2];
+        // calculate dc delta
+        float dc_del_0 = 0.0f;
+        float dc_del_1 = 0.0f;
+        float dc_del_2 = 0.0f;
+    //	float dc_lvl_f = log2f(pixel_size);
+        float dc_lvl_f = log2f(rel_min_pixel_size) / 2.0f + 3.0f;
+        if (dc_lvl_f <= 1.0f) {
+            dc_del_0 = dc_delta[idx * MAX_DC_LVL * 3];
+            dc_del_1 = dc_delta[idx * MAX_DC_LVL * 3 + 1];
+            dc_del_2 = dc_delta[idx * MAX_DC_LVL * 3 + 2];
+        } else if (dc_lvl_f >= MAX_DC_LVL) {
+            dc_del_0 = dc_delta[idx * MAX_DC_LVL * 3 + (MAX_DC_LVL - 1) * 3];
+            dc_del_1 = dc_delta[idx * MAX_DC_LVL * 3 + (MAX_DC_LVL - 1) * 3 + 1];
+            dc_del_2 = dc_delta[idx * MAX_DC_LVL * 3 + (MAX_DC_LVL - 1) * 3 + 2];
+        } else {
+            dc_lvl_f = min(max(dc_lvl_f, 1.0f), (float)MAX_DC_LVL);
+            int dc_lvl = (int)dc_lvl_f;
+            float dc_del_0_1 = dc_delta[idx * MAX_DC_LVL * 3 + (dc_lvl - 1) * 3];
+            float dc_del_1_1 = dc_delta[idx * MAX_DC_LVL * 3 + (dc_lvl - 1) * 3 + 1];
+            float dc_del_2_1 = dc_delta[idx * MAX_DC_LVL * 3 + (dc_lvl - 1) * 3 + 2];
+            float dc_del_0_2 = dc_delta[idx * MAX_DC_LVL * 3 + dc_lvl * 3];
+            float dc_del_1_2 = dc_delta[idx * MAX_DC_LVL * 3 + dc_lvl * 3 + 1];
+            float dc_del_2_2 = dc_delta[idx * MAX_DC_LVL * 3 + dc_lvl * 3 + 2];
+            dc_del_0 = dc_del_0_1 * (dc_lvl + 1 - dc_lvl_f) + dc_del_0_2 * (dc_lvl_f - dc_lvl);
+            dc_del_1 = dc_del_1_1 * (dc_lvl + 1 - dc_lvl_f) + dc_del_1_2 * (dc_lvl_f - dc_lvl);
+            dc_del_2 = dc_del_2_1 * (dc_lvl + 1 - dc_lvl_f) + dc_del_2_2 * (dc_lvl_f - dc_lvl);
+        }
+        dc_delta_interp[idx * 3] = dc_del_0;
+        dc_delta_interp[idx * 3 + 1] = dc_del_1;
+        dc_delta_interp[idx * 3 + 2] = dc_del_2;
 	} else {
-	    dc_lvl_f = min(max(dc_lvl_f, 1.0f), (float)MAX_DC_LVL);
-	    int dc_lvl = (int)dc_lvl_f;
-	    float dc_del_0_1 = dc_delta[idx * MAX_DC_LVL * 3 + (dc_lvl - 1) * 3];
-	    float dc_del_1_1 = dc_delta[idx * MAX_DC_LVL * 3 + (dc_lvl - 1) * 3 + 1];
-	    float dc_del_2_1 = dc_delta[idx * MAX_DC_LVL * 3 + (dc_lvl - 1) * 3 + 2];
-	    float dc_del_0_2 = dc_delta[idx * MAX_DC_LVL * 3 + dc_lvl * 3];
-	    float dc_del_1_2 = dc_delta[idx * MAX_DC_LVL * 3 + dc_lvl * 3 + 1];
-	    float dc_del_2_2 = dc_delta[idx * MAX_DC_LVL * 3 + dc_lvl * 3 + 2];
-	    dc_del_0 = dc_del_0_1 * (dc_lvl + 1 - dc_lvl_f) + dc_del_0_2 * (dc_lvl_f - dc_lvl);
-	    dc_del_1 = dc_del_1_1 * (dc_lvl + 1 - dc_lvl_f) + dc_del_1_2 * (dc_lvl_f - dc_lvl);
-	    dc_del_2 = dc_del_2_1 * (dc_lvl + 1 - dc_lvl_f) + dc_del_2_2 * (dc_lvl_f - dc_lvl);
+	    occ_mult_interp[idx] = 1.0f;
+	    dc_delta_interp[idx * 3] = 0.0f;
+	    dc_delta_interp[idx * 3 + 1] = 0.0f;
+	    dc_delta_interp[idx * 3 + 2] = 0.0f;
 	}
-	dc_delta_interp[idx * 3] = dc_del_0;
-	dc_delta_interp[idx * 3 + 1] = dc_del_1;
-	dc_delta_interp[idx * 3 + 2] = dc_del_2;
-
 
 //	printf("level set %f %f %f\n", level_set, occ, pixel_size);
 
@@ -450,6 +460,7 @@ renderCUDA(
     max_pixel_size = 0;
     __shared__ float collected_depths[BLOCK_SIZE];
     __shared__ bool collected_base_mask[BLOCK_SIZE];
+    const bool dc_occ_mult = false;
     __shared__ float collected_occ_mult_interp[BLOCK_SIZE];
 
 	// Initialize helper variables
@@ -496,8 +507,10 @@ renderCUDA(
             // collect depth
             collected_depths[block.thread_rank()] = depths[coll_id];
 
-            // collect occ mult interp
-            collected_occ_mult_interp[block.thread_rank()] = occ_mult_interp[coll_id];
+            if (dc_occ_mult) {
+                // collect occ mult interp
+                collected_occ_mult_interp[block.thread_rank()] = occ_mult_interp[coll_id];
+            }
 		}
 		block.sync();
 
@@ -522,8 +535,10 @@ renderCUDA(
 			// Avoid numerical instabilities (see paper appendix). 
 			float alpha = min(0.99f, con_o.w * exp(power));
 
-			// apply occ mult interp
-			alpha *= collected_occ_mult_interp[j];
+            if (dc_occ_mult) {
+                // apply occ mult interp
+                alpha *= collected_occ_mult_interp[j];
+            }
 
 			float pixel_size = collected_pixel_size[j];
 
@@ -650,7 +665,8 @@ void FORWARD::preprocess(int P, int D, int M,
 	const dim3 grid,
 	uint32_t* tiles_touched,
 	bool prefiltered,
-	const bool filter_small
+	const bool filter_small,
+	const bool filter_large
 	)
 {
 	preprocessCUDA<NUM_CHANNELS> << <(P + 255) / 256, 256 >> > (
@@ -687,6 +703,7 @@ void FORWARD::preprocess(int P, int D, int M,
 		grid,
 		tiles_touched,
 		prefiltered,
-		filter_small
+		filter_small,
+		filter_large
 		);
 }

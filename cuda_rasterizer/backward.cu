@@ -365,6 +365,7 @@ __global__ void preprocessCUDA(
 	const float* proj,
 	const glm::vec3* campos,
 	const bool filter_small,
+	const bool filter_large,
 	const float3* dL_dmean2D,
 	glm::vec3* dL_dmeans,
 	float* dL_dcolor,
@@ -404,27 +405,31 @@ __global__ void preprocessCUDA(
 //        }
     }
 
-    if (rel_max_pixel_size > 4.0f && !base_mask[idx]) {
-        return;
+    if (filter_large) {
+        if (rel_max_pixel_size > 4.0f && !base_mask[idx]) {
+            return;
+        }
     }
 
-
+    const bool dc_occ_mult = false;
+    const int MAX_DC_LVL = 4;
+    float dc_delta_ratio[MAX_DC_LVL] = {0};
+    if (dc_occ_mult) {
     // dc delta related
-	const int MAX_DC_LVL = 4;
-	float dc_delta_ratio[MAX_DC_LVL] = {0};
-//    float dc_lvl_f = log2f(pixel_size);
-    float dc_lvl_f = log2f(rel_min_pixel_size) / 2.0f + 3.0f;
-    if (dc_lvl_f <= 1) {
-        dc_delta_ratio[0] = 1.0f;
-    } else if (dc_lvl_f >= MAX_DC_LVL) {
-        dc_delta_ratio[MAX_DC_LVL - 1] = 1.0f;
-    } else {
-        dc_lvl_f = min(max(dc_lvl_f, 1.0f), (float)MAX_DC_LVL);
-        int dc_lvl = (int)dc_lvl_f;
-        float ratio_1 = dc_lvl + 1 - dc_lvl_f;
-        float ratio_2 = dc_lvl_f - dc_lvl;
-        dc_delta_ratio[dc_lvl - 1] = ratio_1;
-        dc_delta_ratio[dc_lvl] = ratio_2;
+    //    float dc_lvl_f = log2f(pixel_size);
+        float dc_lvl_f = log2f(rel_min_pixel_size) / 2.0f + 3.0f;
+        if (dc_lvl_f <= 1) {
+            dc_delta_ratio[0] = 1.0f;
+        } else if (dc_lvl_f >= MAX_DC_LVL) {
+            dc_delta_ratio[MAX_DC_LVL - 1] = 1.0f;
+        } else {
+            dc_lvl_f = min(max(dc_lvl_f, 1.0f), (float)MAX_DC_LVL);
+            int dc_lvl = (int)dc_lvl_f;
+            float ratio_1 = dc_lvl + 1 - dc_lvl_f;
+            float ratio_2 = dc_lvl_f - dc_lvl;
+            dc_delta_ratio[dc_lvl - 1] = ratio_1;
+            dc_delta_ratio[dc_lvl] = ratio_2;
+        }
     }
 
 	float3 m = means[idx];
@@ -450,10 +455,12 @@ __global__ void preprocessCUDA(
 	if (shs)
 		computeColorFromSH(idx, D, M, (glm::vec3*)means, *campos, shs, clamped, (glm::vec3*)dL_dcolor, (glm::vec3*)dL_dmeans, (glm::vec3*)dL_dsh);
         // since sh_dc and dc_delta are summed together, their gradient are the same
-        for (int i = 0; i < MAX_DC_LVL; i++) {
-            dL_ddc_delta[idx * MAX_DC_LVL * 3 + i * 3] = dL_dsh[idx * M * 3] * dc_delta_ratio[i];
-            dL_ddc_delta[idx * MAX_DC_LVL * 3 + i * 3 + 1] = dL_dsh[idx * M * 3 + 1] * dc_delta_ratio[i];
-            dL_ddc_delta[idx * MAX_DC_LVL * 3 + i * 3 + 2] = dL_dsh[idx * M * 3 + 2] * dc_delta_ratio[i];
+        if (dc_occ_mult) {
+            for (int i = 0; i < MAX_DC_LVL; i++) {
+                dL_ddc_delta[idx * MAX_DC_LVL * 3 + i * 3] = dL_dsh[idx * M * 3] * dc_delta_ratio[i];
+                dL_ddc_delta[idx * MAX_DC_LVL * 3 + i * 3 + 1] = dL_dsh[idx * M * 3 + 1] * dc_delta_ratio[i];
+                dL_ddc_delta[idx * MAX_DC_LVL * 3 + i * 3 + 2] = dL_dsh[idx * M * 3 + 2] * dc_delta_ratio[i];
+            }
         }
 
 	// Compute gradient updates due to computing covariance from scale/rotation
@@ -480,6 +487,7 @@ renderCUDA(
 	const uint32_t* __restrict__ n_contrib,
 	const bool* base_mask,
 	const bool filter_small,
+	const bool filter_large,
 	const float fade_size,
 	const float* __restrict__ dL_dpixels,
 	float3* __restrict__ dL_dmean2D,
@@ -513,9 +521,11 @@ renderCUDA(
 	__shared__ float collected_rel_min_pixel_size[BLOCK_SIZE];
 	__shared__ float collected_rel_max_pixel_size[BLOCK_SIZE];
 	__shared__ bool collected_base_mask[BLOCK_SIZE];
-	__shared__ float collected_occ_mult_interp[BLOCK_SIZE];
-	const int MAX_OCC_LVL = 4;
-	__shared__ float collected_occ_mult_ratio[MAX_OCC_LVL * BLOCK_SIZE];
+
+	const bool dc_occ_mult = false;
+    __shared__ float collected_occ_mult_interp[BLOCK_SIZE];
+    const int MAX_OCC_LVL = 4;
+    __shared__ float collected_occ_mult_ratio[MAX_OCC_LVL * BLOCK_SIZE];
 
 	// In the forward, we stored the final value for T, the
 	// product of all (1 - alpha) factors. 
@@ -582,23 +592,25 @@ renderCUDA(
             collected_base_mask[block.thread_rank()] = base_mask[coll_id];
 
             // occ multiplier related
-            collected_occ_mult_interp[block.thread_rank()] = occ_mult_interp[coll_id];
-            for (int j = 0; j < MAX_OCC_LVL; j++) {
-                collected_occ_mult_ratio[block.thread_rank() * MAX_OCC_LVL + j] = 0.0f;
-            }
-//            float occ_lvl_f = log2f(pixel_size);
-            float occ_lvl_f = log2f(rel_min_pixel_size) / 2.0f + 3.0f;
-            if (occ_lvl_f <= 1.0f) {
-                collected_occ_mult_ratio[block.thread_rank() * MAX_OCC_LVL] = 1.0f;
-            } else if (occ_lvl_f >= MAX_OCC_LVL) {
-                collected_occ_mult_ratio[block.thread_rank() * MAX_OCC_LVL + MAX_OCC_LVL - 1] = 1.0f;
-            } else {
-                occ_lvl_f = min(max(occ_lvl_f, 1.0f), (float)MAX_OCC_LVL);
-                int occ_lvl = (int)occ_lvl_f;
-                float ratio_1 = occ_lvl + 1 - occ_lvl_f;
-                float ratio_2 = occ_lvl_f - occ_lvl;
-                collected_occ_mult_ratio[block.thread_rank() * MAX_OCC_LVL + occ_lvl - 1] = ratio_1;
-                collected_occ_mult_ratio[block.thread_rank() * MAX_OCC_LVL + occ_lvl] = ratio_2;
+            if (dc_occ_mult) {
+                collected_occ_mult_interp[block.thread_rank()] = occ_mult_interp[coll_id];
+                for (int j = 0; j < MAX_OCC_LVL; j++) {
+                    collected_occ_mult_ratio[block.thread_rank() * MAX_OCC_LVL + j] = 0.0f;
+                }
+    //            float occ_lvl_f = log2f(pixel_size);
+                float occ_lvl_f = log2f(rel_min_pixel_size) / 2.0f + 3.0f;
+                if (occ_lvl_f <= 1.0f) {
+                    collected_occ_mult_ratio[block.thread_rank() * MAX_OCC_LVL] = 1.0f;
+                } else if (occ_lvl_f >= MAX_OCC_LVL) {
+                    collected_occ_mult_ratio[block.thread_rank() * MAX_OCC_LVL + MAX_OCC_LVL - 1] = 1.0f;
+                } else {
+                    occ_lvl_f = min(max(occ_lvl_f, 1.0f), (float)MAX_OCC_LVL);
+                    int occ_lvl = (int)occ_lvl_f;
+                    float ratio_1 = occ_lvl + 1 - occ_lvl_f;
+                    float ratio_2 = occ_lvl_f - occ_lvl;
+                    collected_occ_mult_ratio[block.thread_rank() * MAX_OCC_LVL + occ_lvl - 1] = ratio_1;
+                    collected_occ_mult_ratio[block.thread_rank() * MAX_OCC_LVL + occ_lvl] = ratio_2;
+                }
             }
 		}
 		block.sync();
@@ -624,8 +636,10 @@ renderCUDA(
 //			const float alpha = min(0.99f, con_o.w * G);
 			float alpha = min(0.99f, con_o.w * G);
 
-			// apply occ mult interp
-			alpha *= collected_occ_mult_interp[j];
+            if (dc_occ_mult) {
+                // apply occ mult interp
+                alpha *= collected_occ_mult_interp[j];
+            }
 
 			// scale alpha based on pixel size
 			float pixel_size = collected_pixel_size[j];
@@ -639,7 +653,9 @@ renderCUDA(
                 continue;
             }
 
-            if (rel_max_pixel_size > 4.0f && !collected_base_mask[j]) {
+            if (filter_large
+                && rel_max_pixel_size > 4.0f
+                && !collected_base_mask[j]) {
                 continue;
             }
 
@@ -704,12 +720,15 @@ renderCUDA(
 			atomicAdd(&dL_dconic2D[global_id].w, -0.5f * gdy * d.y * dL_dG);
 
 			// Update gradients w.r.t. opacity of the Gaussian
-//			atomicAdd(&(dL_dopacity[global_id]), G * dL_dalpha);
-			atomicAdd(&(dL_dopacity[global_id]), G * collected_occ_mult_interp[j] * dL_dalpha);
-			for (int lvl = 0; lvl < MAX_OCC_LVL; lvl++) {
-                atomicAdd(&(dL_docc_multiplier[global_id * MAX_OCC_LVL + lvl]),
-                    collected_occ_mult_ratio[j * MAX_OCC_LVL + lvl] * min(0.99f, con_o.w * G) * dL_dalpha);
-			}
+            if (dc_occ_mult) {
+                atomicAdd(&(dL_dopacity[global_id]), G * collected_occ_mult_interp[j] * dL_dalpha);
+                for (int lvl = 0; lvl < MAX_OCC_LVL; lvl++) {
+                    atomicAdd(&(dL_docc_multiplier[global_id * MAX_OCC_LVL + lvl]),
+                        collected_occ_mult_ratio[j * MAX_OCC_LVL + lvl] * min(0.99f, con_o.w * G) * dL_dalpha);
+                }
+            } else {
+                atomicAdd(&(dL_dopacity[global_id]), G * dL_dalpha);
+            }
 		}
 	}
 }
@@ -736,6 +755,7 @@ void BACKWARD::preprocess(
 	const float tan_fovx, float tan_fovy,
 	const glm::vec3* campos,
 	const bool filter_small,
+	const bool filter_large,
 	const float3* dL_dmean2D,
 	const float* dL_dconic,
 	glm::vec3* dL_dmean3D,
@@ -785,6 +805,7 @@ void BACKWARD::preprocess(
 		projmatrix,
 		campos,
 		filter_small,
+		filter_large,
 		(float3*)dL_dmean2D,
 		(glm::vec3*)dL_dmean3D,
 		dL_dcolor,
@@ -812,6 +833,7 @@ void BACKWARD::render(
 	const uint32_t* n_contrib,
 	const bool* base_mask,
 	const bool filter_small,
+	const bool filter_large,
 	const float fade_size,
 	const float* dL_dpixels,
 	float3* dL_dmean2D,
@@ -836,6 +858,7 @@ void BACKWARD::render(
 		n_contrib,
 		base_mask,
 		filter_small,
+		filter_large,
 		fade_size,
 		dL_dpixels,
 		dL_dmean2D,

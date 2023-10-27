@@ -223,6 +223,7 @@ int CudaRasterizer::Rasterizer::forward(
 	const float tan_fovx, float tan_fovy,
 	const bool prefiltered,
 	const bool filter_small,
+	const bool filter_large,
 	const float fade_size,
 	float* out_color,
 	float* out_acc_pixel_size,
@@ -291,7 +292,8 @@ int CudaRasterizer::Rasterizer::forward(
 		tile_grid,
 		geomState.tiles_touched,
 		prefiltered,
-	    filter_small
+	    filter_small,
+	    filter_large
 	), debug)
 
 	// Compute prefix sum over full list of touched tile counts by Gaussians
@@ -390,6 +392,7 @@ void CudaRasterizer::Rasterizer::backward(
 	char* binning_buffer,
 	char* img_buffer,
 	const bool filter_small,
+	const bool filter_large,
 	float fade_size,
 	const float* dL_dpix,
 	float* dL_dmean2D,
@@ -443,6 +446,7 @@ void CudaRasterizer::Rasterizer::backward(
 		imgState.n_contrib,
 		base_mask,
 		filter_small,
+		filter_large,
 		fade_size,
 		dL_dpix,
 		(float3*)dL_dmean2D,
@@ -477,6 +481,7 @@ void CudaRasterizer::Rasterizer::backward(
 		tan_fovx, tan_fovy,
 		(glm::vec3*)campos,
 	    filter_small,
+	    filter_large,
 		(float3*)dL_dmean2D,
 		dL_dconic,
 		(glm::vec3*)dL_dmean3D,

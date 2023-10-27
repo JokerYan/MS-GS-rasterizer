@@ -96,6 +96,7 @@ class _RasterizeGaussians(torch.autograd.Function):
             raster_settings.campos,
             raster_settings.prefiltered,
             raster_settings.filter_small,
+            raster_settings.filter_large,
             raster_settings.fade_size,
             raster_settings.debug,
         )
@@ -155,6 +156,7 @@ class _RasterizeGaussians(torch.autograd.Function):
                 binningBuffer,
                 imgBuffer,
                 raster_settings.filter_small,
+                raster_settings.filter_large,
                 raster_settings.fade_size,
                 raster_settings.debug,
                 )
@@ -206,6 +208,7 @@ class GaussianRasterizationSettings(NamedTuple):
     prefiltered: bool
     debug: bool
     filter_small: bool
+    filter_large: bool
     fade_size: float
 
 class GaussianRasterizer(nn.Module):
