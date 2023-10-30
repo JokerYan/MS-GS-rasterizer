@@ -276,11 +276,10 @@ __global__ void preprocessCUDA(int P, int D, int M,
 //        }
 
     if (filter_large) {
-        if (rel_max_pixel_size > 4.0f && !base_mask[idx]) {
+        if (rel_max_pixel_size > 1.5f && !base_mask[idx]) {
             return;
         }
     }
-
 
     //	else if (pixel_size < 3.0f && pixel_size >= 2.0f && !base_mask[idx]) {
     //	    float rel_min_pixel_size = (pixel_size - 2.0f) / 1.0f;
@@ -361,8 +360,15 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float2 point_image = { ndc2Pix(p_proj.x, W), ndc2Pix(p_proj.y, H) };
 	uint2 rect_min, rect_max;
 	getRect(point_image, my_radius, rect_min, rect_max, grid);
-	if ((rect_max.x - rect_min.x) * (rect_max.y - rect_min.y) == 0)
+	if ((rect_max.x - rect_min.x) * (rect_max.y - rect_min.y) == 0) {
+//        if ((rect_max.x - rect_min.x) == 0) {
+////            printf("%f %f %f max_x:%f min_x:%f, px:%f\n", my_radius, point_image.x, point_image.y, rect_max.x, rect_min.x, p_proj.x);
+//            printf("out %f %f %f\n", p_proj.x, p_hom.x, p_w);
+//        } else {
+//            printf("in  %f %f %f\n", p_proj.x, p_hom.x, p_w);
+//        }
 		return;
+	}
 
 	// If colors have been precomputed, use them, otherwise convert
 	// spherical harmonics coefficients to RGB color.

@@ -406,7 +406,7 @@ __global__ void preprocessCUDA(
     }
 
     if (filter_large) {
-        if (rel_max_pixel_size > 4.0f && !base_mask[idx]) {
+        if (rel_max_pixel_size > 1.5f && !base_mask[idx]) {
             return;
         }
     }
@@ -654,7 +654,7 @@ renderCUDA(
             }
 
             if (filter_large
-                && rel_max_pixel_size > 4.0f
+                && rel_max_pixel_size > 1.5f
                 && !collected_base_mask[j]) {
                 continue;
             }
