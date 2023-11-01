@@ -647,7 +647,7 @@ renderCUDA(
 			float rel_max_pixel_size = collected_rel_max_pixel_size[j];
 
             if (filter_small
-                && rel_min_pixel_size < 0.5
+                && rel_min_pixel_size < 0.5f
                 && pixel_size < 2.0f
                 && !collected_base_mask[j]) {
                 continue;
