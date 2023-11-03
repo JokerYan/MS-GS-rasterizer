@@ -199,7 +199,7 @@ __global__ void computeCov2DCUDA(int P,
 	float c = cov2D[1][1] += 0.3f;
 //	float a = cov2D[0][0];
 //	float b = cov2D[0][1];
-//	float c = cov2D[1][1]f;
+//	float c = cov2D[1][1];
 
 	float denom = a * c - b * b;
 	float dL_da = 0, dL_db = 0, dL_dc = 0;
@@ -406,7 +406,7 @@ __global__ void preprocessCUDA(
     }
 
     if (filter_large) {
-        if (rel_max_pixel_size > 1.5f && !base_mask[idx]) {
+        if (rel_max_pixel_size > 2.0f && !base_mask[idx]) {
             return;
         }
     }
@@ -654,7 +654,7 @@ renderCUDA(
             }
 
             if (filter_large
-                && rel_max_pixel_size > 1.5f
+                && rel_max_pixel_size > 2.0f
                 && !collected_base_mask[j]) {
                 continue;
             }

@@ -276,7 +276,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 //        }
 
     if (filter_large) {
-        if (rel_max_pixel_size > 1.5f && !base_mask[idx]) {
+        if (rel_max_pixel_size > 2.0f && !base_mask[idx]) {
             return;
         }
     }
